@@ -95,8 +95,8 @@ struct pnotify_watch {
 };
 
 /* Forward declarations */
-static int      scan_directory(struct directory * dir, int fd);
 #if HAVE_KQUEUE
+static int      scan_directory(struct directory * dir, int fd);
 static int      kq_directory_event_handler(struct kevent kev, struct pnotify_cb * ctl, struct pnotify_watch * watch);
 #endif
 
@@ -130,7 +130,6 @@ int
 pnotify_add_watch(struct pnotify_cb *ctl, const char *pathname, int mask)
 {
 	struct pnotify_watch *watch;
-	struct stat     st;
 
 	assert(ctl && pathname);
 
@@ -144,6 +143,7 @@ pnotify_add_watch(struct pnotify_cb *ctl, const char *pathname, int mask)
 #if HAVE_KQUEUE
 
 	struct kevent   kev;
+	struct stat     st;
 
 	/* Open the file */
 	if ((watch->fd = open(pathname, O_RDONLY)) < 0) {
@@ -539,6 +539,8 @@ pnotify_free(struct pnotify_cb *ctl)
 /*-------------------------------------------------------------------------------*/
 /*-------------------------------------------------------------------------------*/
 
+#if HAVE_KQUEUE
+
 /**
  Scan a directory looking for new, modified, and deleted files.
  */
@@ -631,7 +633,6 @@ scan_directory(struct directory * dir, int fd)
 }
 
 
-#if HAVE_KQUEUE
 
 /**
  Handle an event inside a directory (kqueue version)
