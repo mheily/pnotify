@@ -1,0 +1,18 @@
+PNOTIFY
+-------
+
+libpnotify is an event notification framework for monitoring files and directories.
+It is designed to be portable across different Unix-like kernels and currently
+supports Linux and BSD.  The API is very similar to the inotify(7) API under Linux.
+
+libpnotify has been ported to the following platforms:
+
+	* Linux 2.6
+	* OpenBSD 4.0
+	* NetBSD 3.0
+	* MacOS/X 10.4
+
+Even though libpnotify is built as a shared library by default, 
+it is easier for application developers to include
+pnotify.c and pnotify.h in their source tree and not depend
+on the existence of a shared library. 
