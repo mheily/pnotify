@@ -21,14 +21,30 @@ lib_LIBRARIES=		libpnotify.a
 libpnotify_a_SOURCES=	pnotify.c
 libpnotify_a_CFLAGS=	-O2 -g -Wall
 dist_man3_MANS=		pnotify.3
+EXTRA_DIST=		index.html
 
 #
 # Unit testing program
 # 
 TESTS=			test
 check_PROGRAMS=		test
-test_SOURCES=		test.c
-test_LDADD=		libpnotify.a
+test_SOURCES=		test.c pnotify.c
+test_CFLAGS=		-DPNOTIFY_DEBUG=1
 
+# Preview the manpage in the current terminal window
 preview-man:
 	nroff -Tascii -mandoc pnotify.3 | less
+
+# The 'doc' target generates additional documentation
+doc:
+	groff -Thtml -mandoc pnotify.3 > manpage.html
+	groff -Tps -mandoc pnotify.3 > manpage.ps
+	lynx -dump index.html > README
+
+# The 'sync' target rebuilds the webpage and uploads it to the public server
+
+sync:		doc
+	scp index.html manpage.html manpage.ps $$WWWHOST:~/public_html/pnotify
+
+# Ensure that the documentation is regenerated when building a source tarball
+dist-hook:	doc

@@ -49,11 +49,11 @@
 # include <sys/inotify.h>
 #endif
 
-#define PNOTIFY_DEBUG 0
-#if PNOTIFY_DEBUG
-#define dprintf printf
+/* The 'dprintf' macro is used for printf() debugging */
+#ifdef PNOTIFY_DEBUG
+# define dprintf printf
 #else
-#define dprintf(...) do { ; } while (0)
+# define dprintf(...) do { ; } while (0)
 #endif
 
 /** The maximum number of watches that a single controller can have */
@@ -370,10 +370,20 @@ retry_wait:
 	
 	} else {
 
-		/* Handle events on files v.s. directories separately */
-		if (kq_directory_event_handler(kev, ctl, watchp) < 0) {
-			warn("error processing diretory");
-			return -1;
+		/* When a file is added or deleted, NOTE_WRITE is set */
+		if (kev.fflags & NOTE_WRITE) {
+			if (kq_directory_event_handler(kev, ctl, watchp) < 0) {
+				warn("error processing diretory");
+				return -1;
+			}
+		}
+		/* FIXME: Handle the deletion of a watched directory */
+		else if (kev.fflags & NOTE_DELETE) {
+				warn("unimplemented - TODO");
+				return -1;
+		} else {
+				warn("unknown event recieved");
+				return -1;
 		}
 
 	}
@@ -558,15 +568,6 @@ scan_directory(struct directory * dir, int fd)
 
 	assert(dir != NULL);
 
-	/* Delete all entries from the 'new' list */
-	if (!LIST_EMPTY(&dir->new)) {
-		dptr = LIST_FIRST(&dir->new);
-		while (dptr != NULL) {
-			dtmp = LIST_NEXT(dptr, entries);
-			free(dptr);
-			dptr = dtmp;
-		}
-	}
 	/* Delete all entries from the 'deleted' list */
 	if (!LIST_EMPTY(&dir->del)) {
 		dptr = LIST_FIRST(&dir->del);
@@ -643,43 +644,42 @@ kq_directory_event_handler(struct kevent kev,
 			   struct pnotify_watch * watch)
 {
 	struct pnotify_event *ev;
-	struct dentry  *dp;
+	struct dentry  *dptr, *dtmp;
 
 	assert(ctl && watch);
 
-	/* When a file is added or deleted, NOTE_WRITE is set */
-	if (kev.fflags & NOTE_WRITE) {
 
-		/* Re-scan the directory to find new and deleted files */
-		if (scan_directory(&watch->dir, watch->fd) < 0)
-			err(3, "scan_directory failed");
+	/* Re-scan the directory to find new and deleted files */
+	if (scan_directory(&watch->dir, watch->fd) < 0)
+		err(3, "scan_directory failed");
 
-		/* Generate an event for each 'new' file */
-		LIST_FOREACH(dp, &watch->dir.new, entries) {
+	/* Generate an event for each 'new' file */
+	dptr = LIST_FIRST(&watch->dir.new);
+	while (dptr != NULL) {
 
-			/* Construct a pnotify_event structure */
-			if ((ev = calloc(1, sizeof(*ev))) == NULL) {
-				warn("malloc failed");
-				return -1;
-			}
-			ev->wd = watch->wd;
-			ev->mask = PN_CREATE;
-			(void) strlcpy(ev->name, dp->ent.d_name, sizeof(ev->name));
-
-			/* Add the event to the list of pending events */
-			STAILQ_INSERT_TAIL(&ctl->event, ev, entries);
+		/* Construct a pnotify_event structure */
+		if ((ev = calloc(1, sizeof(*ev))) == NULL) {
+			warn("malloc failed");
+			return -1;
 		}
+		ev->wd = watch->wd;
+		ev->mask = PN_CREATE;
+		(void) strlcpy(ev->name, dptr->ent.d_name, sizeof(ev->name));
 
-		/* XXX - FIXME */
+		/* Add the event to the list of pending events */
+		STAILQ_INSERT_TAIL(&ctl->event, ev, entries);
 
-		/** @todo Generate an event for each 'deleted' file */
-
-		/** @todo Generate an event for each 'modified' file */
-
-	} else {
-		//kevent_print(kev);
-		err(3, "FIXME - TODO");
+		/* Remove the entry from the 'new' file list */
+		dtmp = LIST_NEXT(dptr, entries);
+		free(dptr);
+		dptr = dtmp;
 	}
+
+	/* XXX - FIXME */
+
+	/** @todo Generate an event for each 'deleted' file */
+
+	/** @todo Generate an event for each 'modified' file */
 
 	return 0;
 }

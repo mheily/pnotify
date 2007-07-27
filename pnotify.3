@@ -71,13 +71,12 @@ All other functions return zero if successful, or -1 if an error occurs.
 .Sh EXAMPLES
 
 The following example creates a watch on the /tmp directory and prints the 
-names of files that are created or deleted in the directory.
-
+names of files that are created or deleted within the directory.
 .Bd -literal
-pnotify_cb ctl;
-pnotify_event evt;
+struct pnotify_cb ctl;
+struct pnotify_event evt;
 
-pnotify_new(&ctl);
+pnotify_init(&ctl);
 pnotify_add_watch(&ctl, "/tmp", PN_ALL_EVENTS);
 while (pnotify_get_event(&evt, &ctl, NULL) == 0) {
 	if (evt.mask & PN_CREATE) 
@@ -90,7 +89,6 @@ while (pnotify_get_event(&evt, &ctl, NULL) == 0) {
 	}
 }
 pnotify_free(&ctl);
-
 .Ed
 
 .Sh THREADSAFETY
@@ -107,7 +105,8 @@ unless it is protected by a mutex.
 .Xr inotify 7
 
 .\" .Sh STANDARDS
-.\" .Sh HISTORY
+.Sh HISTORY
+pnotify was first released on July 25th, 2007 with support for inotify and kqueue.
 .Sh AUTHORS
 Mark Heily <devel@heily.com>
 .\" .Sh CAVEATS
