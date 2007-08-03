@@ -22,7 +22,6 @@
 #include <dirent.h>
 #include <stdint.h>
 #include <limits.h>
-#include <sys/queue.h>
 
 /* kqueue(4) in MacOS/X does not support NOTE_TRUNCATE */
 #ifndef NOTE_TRUNCATE
@@ -36,6 +35,21 @@
  These were taken from FreeBSD 6.2's queue.h.
 */
 
+#ifndef LIST_HEAD
+#define	LIST_HEAD(name, type)						\
+struct name {								\
+	struct type *lh_first;	/* first element */			\
+}
+#endif
+
+#ifndef LIST_ENTRY
+#define	LIST_ENTRY(type)						\
+struct {								\
+	struct type *le_next;	/* next element */			\
+	struct type **le_prev;	/* address of previous next element */	\
+}
+#endif
+
 #ifndef STAILQ_HEAD
 #define	STAILQ_HEAD(name, type)						\
 struct name {								\
@@ -44,98 +58,11 @@ struct name {								\
 }
 #endif
 
-#ifndef STAILQ_HEAD_INITIALIZER
-#define	STAILQ_HEAD_INITIALIZER(head)					\
-	{ NULL, &(head).stqh_first }
-#endif
-
 #ifndef STAILQ_ENTRY
 #define	STAILQ_ENTRY(type)						\
 struct {								\
 	struct type *stqe_next;	/* next element */			\
 }
-#endif
-
-#ifndef STAILQ_EMPTY
-#define	STAILQ_EMPTY(head)	((head)->stqh_first == NULL)
-#endif
-
-#ifndef STAILQ_FIRST
-#define	STAILQ_FIRST(head)	((head)->stqh_first)
-#endif
-
-#ifndef STAILQ_FOREACH
-#define	STAILQ_FOREACH(var, head, field)				\
-	for((var) = STAILQ_FIRST((head));				\
-	   (var);							\
-	   (var) = STAILQ_NEXT((var), field))
-#endif
-
-#ifndef STAILQ_INIT
-#define	STAILQ_INIT(head) do {						\
-	STAILQ_FIRST((head)) = NULL;					\
-	(head)->stqh_last = &STAILQ_FIRST((head));			\
-} while (0)
-#endif
-
-#ifndef	STAILQ_INSERT_AFTER
-#define	STAILQ_INSERT_AFTER(head, tqelm, elm, field) do {		\
-	if ((STAILQ_NEXT((elm), field) = STAILQ_NEXT((tqelm), field)) == NULL)\
-		(head)->stqh_last = &STAILQ_NEXT((elm), field);		\
-	STAILQ_NEXT((tqelm), field) = (elm);				\
-} while (0)
-#endif
-
-#ifndef	STAILQ_INSERT_HEAD
-#define	STAILQ_INSERT_HEAD(head, elm, field) do {			\
-	if ((STAILQ_NEXT((elm), field) = STAILQ_FIRST((head))) == NULL)	\
-		(head)->stqh_last = &STAILQ_NEXT((elm), field);		\
-	STAILQ_FIRST((head)) = (elm);					\
-} while (0)
-#endif
-
-#ifndef	STAILQ_INSERT_TAIL
-#define	STAILQ_INSERT_TAIL(head, elm, field) do {			\
-	STAILQ_NEXT((elm), field) = NULL;				\
-	*(head)->stqh_last = (elm);					\
-	(head)->stqh_last = &STAILQ_NEXT((elm), field);			\
-} while (0)
-#endif
-
-#ifndef STAILQ_LAST
-#define	STAILQ_LAST(head, type, field)					\
-	(STAILQ_EMPTY((head)) ?						\
-		NULL :							\
-	        ((struct type *)(void *)				\
-		((char *)((head)->stqh_last) - __offsetof(struct type, field))))
-#endif
-
-#ifndef STAILQ_NEXT
-#define	STAILQ_NEXT(elm, field)	((elm)->field.stqe_next)
-#endif
-
-#ifndef STAILQ_REMOVE
-#define	STAILQ_REMOVE(head, elm, type, field) do {			\
-	if (STAILQ_FIRST((head)) == (elm)) {				\
-		STAILQ_REMOVE_HEAD((head), field);			\
-	}								\
-	else {								\
-		struct type *curelm = STAILQ_FIRST((head));		\
-		while (STAILQ_NEXT(curelm, field) != (elm))		\
-			curelm = STAILQ_NEXT(curelm, field);		\
-		if ((STAILQ_NEXT(curelm, field) =			\
-		     STAILQ_NEXT(STAILQ_NEXT(curelm, field), field)) == NULL)\
-			(head)->stqh_last = &STAILQ_NEXT((curelm), field);\
-	}								\
-} while (0)
-#endif
-
-#ifndef STAILQ_REMOVE_HEAD
-#define	STAILQ_REMOVE_HEAD(head, field) do {				\
-	if ((STAILQ_FIRST((head)) =					\
-	     STAILQ_NEXT(STAILQ_FIRST((head)), field)) == NULL)		\
-		(head)->stqh_last = &STAILQ_FIRST((head));		\
-} while (0)
 #endif
 
 /** pnotify control block 
@@ -239,10 +166,10 @@ enum {
 	/** The modification time of a file has changed */
 	PN_MODIFY		= 0x1 << 3,
 	
-	/** Automatically delete the watch after a matching event is triggered */
+	/** Automatically delete the watch after a matching event occurs */
 	PN_ONESHOT		= 0x1 << 4,
 
-	/** Indicates an error condition in the underlying kernel event queue */
+	/** An error condition in the underlying kernel event queue */
 	PN_ERROR		= 0x1 << 5,
 
 } __PN_BITMASK;
@@ -254,6 +181,11 @@ struct pnotify_event {
 
 	/** The watch descriptor returned by pnotify_add_watch() */
 	int       wd;
+
+	/** The parent watch descriptor, when monitoring files
+ 	    within a directory using kqueue(4). If no parent, this is zero.
+	*/
+	int 	  parent;
 
 	/** One or more bitflags containing the event(s) that occurred */
 	int       mask;
