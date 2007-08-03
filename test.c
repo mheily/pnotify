@@ -24,6 +24,8 @@ event_cmp(struct pnotify_event *ev, int wd, int mask, const char *name)
 	return i;
 }
 
+#define test(x) printf(" * " #x ": %s\n", ((x) >= 0) ? "passed" : "failed")
+
 int
 main(int argc, char **argv)
 {
@@ -39,50 +41,48 @@ main(int argc, char **argv)
 		err(1, "mkdir failed");
 
 	/* Initialize the control structure */
-	if (pnotify_init(&ctl) != 0) 
-		err(1, "%s", "pnotify_new()");
+	test(pnotify_init(&ctl));
 
 	/* Watch for events in the test directory */
-	if ((wd = pnotify_add_watch(&ctl, ".check", PN_ALL_EVENTS)) < 0) 
-		err(1, "%s", "inotify_add_watch()");
+	test((wd = pnotify_add_watch(&ctl, ".check", PN_ALL_EVENTS))); 
 
 	/* Create a new file */
-	if (system("touch .check/foo") < 0)
-		err(1, "touch failed");
+	test (system("touch .check/foo"));
 
 	/* Read the event */
-	if (pnotify_get_event(&evt, &ctl) != 0)
-		err(1, "pnotify_get_event()");
+	test (pnotify_get_event(&evt, &ctl)); 
 	if (!event_cmp(&evt, 1, PN_CREATE, "foo")) 
 		err(1, "unexpected event value");
 
 	/* Create a new file #2 */
-	if (system("touch .check/bar") < 0)
-		err(1, "touch failed");
+	test (system("touch .check/bar"));
 
 	/* Read the event */
-	if (pnotify_get_event(&evt, &ctl) != 0)
-		err(1, "pnotify_get_event()");
+	test (pnotify_get_event(&evt, &ctl));
 	if (!event_cmp(&evt, 1, PN_CREATE, "bar")) 
 		err(1, "unexpected event value");
 
 	/* Delete the new file */
-	if (system("rm .check/foo") < 0)
-		err(1, "rm failed");
+	test (system("rm .check/foo"));
 
 	/* Read the delete event */
-	if (pnotify_get_event(&evt, &ctl) != 0)
-		err(1, "pnotify_get_event()");
+	test (pnotify_get_event(&evt, &ctl));
 	if (!event_cmp(&evt, 1, PN_DELETE, "foo")) 
 		err(1, "unexpected event value");
 
+	/* Modify file #2 */
+	test (system("echo hi >> .check/bar"));
+
+	/* Read the modify event */
+	test (pnotify_get_event(&evt, &ctl));
+	if (!event_cmp(&evt, 1, PN_MODIFY, "bar")) 
+		err(1, "unexpected event value");
+
 	/* Remove the watch */
-	if (pnotify_rm_watch(&ctl, wd) < 0)
-		err(1, "pnotify_rm_watch()");
+	test (pnotify_rm_watch(&ctl, wd));
 		
 	/* Destroy the control structure */
-	if (pnotify_free(&ctl) != 0) 
-		err(1, "%s", "pnotify_free()");
+	test (pnotify_free(&ctl));
 	
 #if DEADWOOD
 	if ((fd = inotify_init()) < 0) 
