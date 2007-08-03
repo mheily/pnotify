@@ -26,34 +26,29 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/param.h>
-#include <sys/queue.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
 
 #include "pnotify.h"
+#include "queue.h"
 
-// FIXME - WORKAROUND
-#if __linux__
+#if defined(__linux__)
 # define HAVE_INOTIFY 1
-# define HAVE_KQUEUE 0
-#else
-# define HAVE_INOTIFY 0
-# define HAVE_KQUEUE 1
-#endif
-
-#if HAVE_KQUEUE
-# include <sys/event.h>
-#elif HAVE_INOTIFY
 # include <sys/inotify.h>
+#else
+# define HAVE_KQUEUE 1
+# include <sys/event.h>
 #endif
 
 /* The 'dprintf' macro is used for printf() debugging */
-#ifdef PNOTIFY_DEBUG
+#if PNOTIFY_DEBUG
 # define dprintf printf
+# define dprint_event(e) (void) pnotify_print_event(e)
 #else
-# define dprintf(...) do { ; } while (0)
+# define dprintf(...)    do { ; } while (0)
+# define dprint_event(e) do { ; } while (0)
 #endif
 
 /** The maximum number of watches that a single controller can have */
@@ -62,21 +57,36 @@ static const int WATCH_MAX = 20000;
 /** An entire directory that is under watch */
 struct directory {
 
+	/** The full pathname of the directory */
+	char    *path;
+	size_t   path_len;
+
+	/** A directory handle returned by opendir(3) */
+	DIR     *dirp;
+
 	/* All entries in the directory (struct dirent) */
 	LIST_HEAD(, dentry) all;
-
-	/* All 'new' entries in the directory */
-	LIST_HEAD(, dentry) new;
-
-	/* All 'deleted' entries in the directory */
-	LIST_HEAD(, dentry) del;
 };
 
 /** A directory entry list element */
 struct dentry {
+
+	/** The directory entry from readdir(3) */
 	struct dirent   ent;
+
+	/** A file descriptor used by kqueue(4) to monitor the entry */
+	int  fd;
+
+	/** The file status from stat(2) */
+	struct stat     st;
+
+	/** All event(s) that occurred on this file */
+	int mask;
+
+	/** Pointer to the next directory entry */
         LIST_ENTRY(dentry) entries;
 };
+
 
 /** An internal watch entry */
 struct pnotify_watch {
@@ -90,15 +100,349 @@ struct pnotify_watch {
 	/* A list of directory entries (only used if is_dir is true) */
 	struct directory dir;
 
+	/* The parent watch descriptor, for watches that are
+	   automatically added on files within a monitored
+	   directory. If zero, there is no parent.
+	 */
+	int parent_wd;
+
+#if HAVE_KQUEUE
+
+	/* The associated kernel event structure */
+	struct kevent    kev;
+
+#endif
+
 	/* Pointer to the next watch */
 	LIST_ENTRY(pnotify_watch) entries;
 };
 
 /* Forward declarations */
 #if HAVE_KQUEUE
-static int      scan_directory(struct directory * dir, int fd);
-static int      kq_directory_event_handler(struct kevent kev, struct pnotify_cb * ctl, struct pnotify_watch * watch);
+static int directory_scan(struct pnotify_cb *ctl, struct pnotify_watch * watch);
+static int directory_open(struct pnotify_cb *ctl, struct pnotify_watch * watch);
+static int kq_directory_event_handler(struct kevent kev, struct pnotify_cb * ctl, struct pnotify_watch * watch);
+
+#  define sys_create_event_queue	kqueue
+#  define sys_add_watch			kq_add_watch
+#  define sys_rm_watch			kq_rm_watch
+#  define sys_get_event			kq_get_event
+#elif HAVE_INOTIFY
+#  define sys_create_event_queue	inotify_init
+#  define sys_add_watch			in_add_watch
+#  define sys_rm_watch			in_rm_watch
+#  define sys_get_event			in_get_event
 #endif
+
+
+#if HAVE_KQUEUE
+
+static inline int
+kq_add_watch(struct pnotify_cb *ctl, struct pnotify_watch *watch)
+{
+	struct stat     st;
+	struct kevent *kev = &watch->kev;
+	int mask = watch->mask;
+
+	/* Open the file */
+	if ((watch->fd = open(watch->path, O_RDONLY)) < 0) {
+		warn("opening path `%s' failed", watch->path);
+		return -1;
+	}
+
+	/* Test if the file is a directory */
+	if (fstat(watch->fd, &st) < 0) {
+		warn("fstat(2) failed");
+		return -1;
+	}
+	watch->is_dir = S_ISDIR(st.st_mode);
+
+	/* Initialize the directory structure, if needed */
+	if (watch->is_dir) 
+		directory_open(ctl, watch);
+
+	/* Generate a new watch ID */
+	/* FIXME - this never decreases and might fail */
+	if ((watch->wd = ++ctl->next_wd) > WATCH_MAX) {
+		warn("watch_max exceeded");
+		return -1;
+	}
+
+	/* Create and populate a kevent structure */
+	EV_SET(kev, watch->fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, 0, 0, watch);
+	if (mask & PN_ACCESS || mask & PN_MODIFY)
+		kev->fflags |= NOTE_ATTRIB;
+	if (mask & PN_CREATE)
+		kev->fflags |= NOTE_WRITE;
+	if (mask & PN_DELETE)
+		kev->fflags |= NOTE_DELETE | NOTE_WRITE;
+	if (mask & PN_MODIFY)
+		kev->fflags |= NOTE_WRITE | NOTE_TRUNCATE | NOTE_EXTEND;
+	if (mask & PN_ONESHOT)
+		kev->flags |= EV_ONESHOT;
+
+	/* Add the kevent to the kernel event queue */
+	if (kevent(ctl->fd, kev, 1, NULL, 0, NULL) < 0) {
+		perror("kevent(2)");
+		return -1;
+	}
+
+	return 0;
+}
+
+
+static inline int
+kq_rm_watch(struct pnotify_cb *ctl, struct pnotify_watch *watch)
+{
+	/* Close the file descriptor.
+	  The kernel will automatically delete the kevent 
+	  and any pending events.
+	 */
+	if (close(watch->fd) < 0) {
+		perror("unable to close watch fd");
+		return -1;
+	}
+
+	/* Close the directory handle */
+	if (watch->dir.dirp != NULL) {
+		if (closedir(watch->dir.dirp) != 0) {
+			perror("closedir(3)");
+			return -1;
+		}
+	}
+}
+
+static inline int
+kq_get_event(struct pnotify_event *evt, struct pnotify_cb *ctl)
+{
+	struct pnotify_watch *watch;
+	struct pnotify_event *evp;
+	struct kevent   kev;
+	int rc;
+
+retry:
+
+	/* Wait for an event notification from the kernel */
+	dprintf("waiting for kernel event..\n");
+	rc = kevent(ctl->fd, NULL, 0, &kev, 1, NULL);
+	if ((rc < 0) || (kev.flags & EV_ERROR)) {
+		warn("kevent(2) failed");
+		return -1;
+	}
+
+	/* Find the matching watch structure */
+	watch = (struct pnotify_watch *) kev.udata;
+
+	/* Workaround:
+
+	   Deleting a file in a watched directory causes two events:
+	     	NOTE_MODIFY on the directory
+		NOTE_DELETE on the file
+
+	   We ignore the NOTE_DELETE on the file.
+        */
+	if (watch->parent_wd && kev.fflags & NOTE_DELETE) {
+		dprintf("ignoring NOTE_DELETE on a watched file\n");
+		goto retry;
+	}
+
+	/* Convert the kqueue(4) flags to pnotify_event flags */
+	if (!watch->is_dir) {
+		if (kev.fflags & NOTE_WRITE)
+			evt->mask |= PN_MODIFY;
+		if (kev.fflags & NOTE_TRUNCATE)
+			evt->mask |= PN_MODIFY;
+		if (kev.fflags & NOTE_EXTEND)
+			evt->mask |= PN_MODIFY;
+#if TODO
+		// not implemented yet
+		if (kev.fflags & NOTE_ATTRIB)
+			evt->mask |= PN_ATTRIB;
+#endif
+		if (kev.fflags & NOTE_DELETE)
+			evt->mask |= PN_DELETE;
+
+		/* Construct a pnotify_event structure */
+		if ((evp = calloc(1, sizeof(*evp))) == NULL) {
+			warn("malloc failed");
+			return -1;
+		}
+
+		/* If the event happened within a watched directory,
+		   add the filename and the parent watch descriptor.
+		*/
+		if (watch->parent_wd) {
+
+			/* KLUDGE: remove the leading basename */
+			char *fn = strrchr(watch->path, '/') ;
+			if (!fn) { 
+				fn = watch->path;
+			} else {
+				fn++;
+			}
+
+			evt->wd = watch->parent_wd;
+			/* FIXME: more error handling */
+			(void) strncpy(evt->name, fn, strlen(fn));
+		}
+
+		/* Add the event to the list of pending events */
+		memcpy(evp, evt, sizeof(*evp));
+		STAILQ_INSERT_TAIL(&ctl->event, evp, entries);
+
+		dprint_event(evt);
+
+	/* Handle events on directories */
+	} else {
+
+		/* When a file is added or deleted, NOTE_WRITE is set */
+		if (kev.fflags & NOTE_WRITE) {
+			if (kq_directory_event_handler(kev, ctl, watch) < 0) {
+				warn("error processing diretory");
+				return -1;
+			}
+		}
+		/* FIXME: Handle the deletion of a watched directory */
+		else if (kev.fflags & NOTE_DELETE) {
+			warn("unimplemented - TODO");
+			return -1;
+		} else {
+			warn("unknown event recieved");
+			return -1;
+		}
+
+	}
+
+	return 0;
+}
+
+#endif /* HAVE_KQUEUE */
+
+/* ------------------------ inotify(7) wrappers -------------------- */
+
+#if HAVE_INOTIFY
+
+static inline int
+in_add_watch(struct pnotify_cb *ctl, struct pnotify_watch *watch)
+{
+	int mask = watch->mask;
+	uint32_t        imask = 0;
+
+	/* Generate the mask */
+	if (mask & PN_ACCESS || mask & PN_MODIFY)
+		imask |= IN_ACCESS | IN_ATTRIB;
+	if (mask & PN_CREATE)
+		imask |= IN_CREATE;
+	if (mask & PN_DELETE)
+		imask |= IN_DELETE | IN_DELETE_SELF;
+	if (mask & PN_MODIFY)
+		imask |= IN_MODIFY;
+	if (mask & PN_ONESHOT)
+		imask |= IN_ONESHOT;
+
+	/* Add the event to the kernel event queue */
+	watch->wd = inotify_add_watch(ctl->fd, watch->path, imask);
+	if (watch->wd < 0) {
+		perror("inotify_add_watch(2) failed");
+		return -1;
+	}
+
+	return 0;
+}
+
+static inline int
+in_rm_watch(struct pnotify_cb *ctl, struct pnotify_watch *watch)
+{
+	// FIXME - this causes an IN_IGNORE event to be generated;
+        // 	need to handle
+	if (inotify_rm_watch(ctl->fd, watch->wd) < 0) {
+		perror("inotify_rm_watch(2)");
+		return -1;
+	}
+
+	return 0;
+}
+
+static inline int
+in_get_event(struct pnotify_event *evt, struct pnotify_cb *ctl)
+{
+	struct pnotify_watch *watch;
+	struct pnotify_event *evp;
+	struct inotify_event *iev, *endp;
+	ssize_t         bytes;
+	char            buf[4096];
+
+retry:
+
+	/* Read the event structure */
+	bytes = read(ctl->fd, &buf, sizeof(buf));
+	if (bytes <= 0) {
+		if (errno == EINTR)
+			goto retry;
+		else
+			perror("read(2)");
+
+		return -1;
+	}
+
+	/* Compute the beginning and end of the event list */
+	iev = (struct inotify_event *) & buf;
+	endp = iev + bytes;
+
+	/* Process each pending event */
+	while (iev < endp) {
+
+		/* XXX-WORKAROUND */
+		if (iev->wd == 0)
+			break;
+
+		/* Find the matching watch structure */
+		LIST_FOREACH(watch, &ctl->watch, entries) {
+			if (watch->wd == iev->wd)
+				break;
+		}
+		if (!watch) {
+			warn("watch # %d not found", iev->wd);
+			return -1;
+		}
+		/* Construct a pnotify_event structure */
+		if ((evp = calloc(1, sizeof(*evp))) == NULL) {
+			warn("malloc failed");
+			return -1;
+		}
+		evp->wd = watch->wd;
+		(void) strncpy(evp->name, iev->name, iev->len);
+		if (iev->mask & IN_ACCESS)
+			evp->mask |= PN_ACCESS;
+#if TODO
+		// not implemented
+		if (iev->mask & IN_ATTRIB)
+			evp->mask |= PN_ATTRIB;
+#endif
+		if (iev->mask & IN_MODIFY)
+			evp->mask |= PN_MODIFY;
+		if (iev->mask & IN_CREATE)
+			evp->mask |= PN_CREATE;
+		if (iev->mask & IN_DELETE)
+			evp->mask |= PN_DELETE;
+		if (iev->mask & IN_DELETE_SELF) {
+			evp->mask |= PN_DELETE;
+			(void) strncpy(evp->name, "", 0);
+		}
+
+		/* Add the event to the list of pending events */
+		STAILQ_INSERT_TAIL(&ctl->event, evp, entries);
+
+		/* Go to the next event */
+		iev += sizeof(*iev) + iev->len;
+	}
+
+	return 0;
+}
+
+#endif /* HAVE_INOTIFY */
+
+/* ----------------------- pnotify(3) interface -------------------- */
 
 int
 pnotify_init(struct pnotify_cb *ctl)
@@ -107,13 +451,8 @@ pnotify_init(struct pnotify_cb *ctl)
 
 	memset(ctl, 0, sizeof(*ctl));
 
-#if HAVE_KQUEUE
-	ctl->fd = kqueue();
-#elif HAVE_INOTIFY
-	ctl->fd = inotify_init();
-#else
-# error STUB
-#endif
+	/* Create a kernel event queue */
+	ctl->fd = sys_create_event_queue();
 	if (ctl->fd < 0) {
 		warn("unable to create event descriptor");
 		return -1;
@@ -139,91 +478,14 @@ pnotify_add_watch(struct pnotify_cb *ctl, const char *pathname, int mask)
 		return -1;
 	}
 	(void) strncpy((char *) &watch->path, pathname, sizeof(watch->path));	
+	watch->mask = mask;
 
-#if HAVE_KQUEUE
-
-	struct kevent   kev;
-	struct stat     st;
-
-	/* Open the file */
-	if ((watch->fd = open(pathname, O_RDONLY)) < 0) {
-		warn("opening path `%s' failed", pathname);
-		goto err;
+	/* Register the watch with the kernel */
+	if (sys_add_watch(ctl, watch) < 0) {
+		warn("adding watch failed");
+		free(watch);
+		return -1;
 	}
-
-	/* Test if the file is a directory */
-	if (fstat(watch->fd, &st) < 0) {
-		warn("fstat(2) failed");
-		goto err;
-	}
-	watch->is_dir = S_ISDIR(st.st_mode);
-
-	/* Initialize the directory structure, if needed */
-	if (watch->is_dir) {
-
-		/* Initialize the li_directory structure */
-		LIST_INIT(&watch->dir.all);
-		LIST_INIT(&watch->dir.new);
-		LIST_INIT(&watch->dir.del);
-
-		/* Scan the directory */
-		if (scan_directory(&watch->dir, watch->fd) < 0) {
-			warn("scan_directory failed");
-			goto err;
-		}
-	}
-
-	/* Generate a new watch ID */
-	/* FIXME - this never decreases and might fail */
-	if ((watch->wd = ++ctl->next_wd) > WATCH_MAX) {
-		warn("watch_max exceeded");
-		goto err;
-	}
-
-	/* Create a kernel event structure */
-	EV_SET(&kev, watch->fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, 0, 0, 0);
-	if (mask & PN_ACCESS || mask & PN_MODIFY)
-		kev.fflags |= NOTE_ATTRIB;
-	if (mask & PN_CREATE)
-		kev.fflags |= NOTE_WRITE;
-	if (mask & PN_DELETE)
-		kev.fflags |= NOTE_DELETE | NOTE_WRITE;
-	if (mask & PN_MODIFY)
-		kev.fflags |= NOTE_WRITE | NOTE_TRUNCATE | NOTE_EXTEND;
-	if (mask & PN_ONESHOT)
-		kev.flags |= EV_ONESHOT;
-
-	/* Add the event to the kernel event queue */
-		if (kevent(ctl->fd, &kev, 1, NULL, 0, NULL) < 0) {
-		warn("kevent(2) failed");
-		goto err;
-	}
-
-#elif HAVE_INOTIFY
-
-	uint32_t        imask = 0;
-
-	/* Generate the mask */
-	if (mask & PN_ACCESS || mask & PN_MODIFY)
-		imask |= IN_ACCESS | IN_ATTRIB;
-	if (mask & PN_CREATE)
-		imask |= IN_CREATE;
-	if (mask & PN_DELETE)
-		imask |= IN_DELETE | IN_DELETE_SELF;
-	if (mask & PN_MODIFY)
-		imask |= IN_MODIFY;
-	if (mask & PN_ONESHOT)
-		imask |= IN_ONESHOT;
-
-	/* Add the event to the kernel event queue */
-	if ((watch->wd = inotify_add_watch(ctl->fd, pathname, imask)) < 0) {
-		warn("inotify_add_watch(2) failed");
-		goto err;
-	}
-
-#else
-# error STUB
-#endif
 
 	/* Update the control block */
 	LIST_INSERT_HEAD(&ctl->watch, watch, entries);
@@ -232,10 +494,6 @@ pnotify_add_watch(struct pnotify_cb *ctl, const char *pathname, int mask)
 		watch->wd, watch->mask, watch->path);
 
 	return watch->wd;
-
-err:
-	free(watch);
-	return -1;
 }
 
 
@@ -249,53 +507,30 @@ err:
 int 
 pnotify_rm_watch(struct pnotify_cb * ctl, int wd)
 {
-	struct pnotify_watch *watchp;
-	struct pnotify_event *evt;
+	struct pnotify_watch *watchp, *wtmp;
+	int found = 0;
 
 	assert(ctl && wd >= 0);
 
-	/* Find the matching watch structure */
-	LIST_FOREACH(watchp, &ctl->watch, entries) {
-		if (watchp->wd == wd)
-			break;
+	/* Find the matching watch structure(s) */
+	LIST_FOREACH_SAFE(watchp, &ctl->watch, entries, wtmp) {
+
+		/* Remove the parent watch and it's children */
+		if ((watchp->wd == wd) || (watchp->parent_wd == wd)) {
+			if (sys_rm_watch(ctl, watchp) < 0) 
+				return -1;
+			LIST_REMOVE(watchp, entries);
+			free(watchp);
+			found++;
+		}
 	}
-	if (!watchp) {
+
+	if (found == 0) {
 		warn("watch # %d not found", wd);
 		return -1;
+	} else {
+		return 0;
 	}
-
-#if HAVE_KQUEUE
-
-	/* Close the file descriptor (this causes the kevent to be deleted) */
-	if (close(watchp->fd) < 0) {
-		perror("unable to close watch fd");
-		return -1;
-	}
-
-#elif HAVE_INOTIFY
-	
-	// FIXME - this causes an IN_IGNORE event to be generated; need to handle
-	if (inotify_rm_watch(ctl->fd, wd) < 0) {
-		perror("inotify_rm_watch(2)");
-		return -1;
-	}
-
-#else
-# error STUB
-#endif
-
-	/* Remove any pending events associated with the watch */
-	/* Sets the mask to zero so the event will be ignored */
-	STAILQ_FOREACH(evt, &ctl->event, entries) {
-		if (evt->wd == wd) 
-			evt->mask = 0;
-	}
-
-	/* Delete the watchlist entry and free the watch struct */
-	LIST_REMOVE(watchp, entries);
-	free(watchp);
-
-	return 0;
 }
 
 
@@ -304,7 +539,6 @@ pnotify_get_event(struct pnotify_event * evt,
 		  struct pnotify_cb * ctl
 		 )
 {
-	struct pnotify_watch *watchp;
 	struct pnotify_event *evp;
 
 	assert(evt && ctl);
@@ -318,149 +552,9 @@ retry_wait:
 	/* Reset the event structure to be empty */
 	memset(evt, 0, sizeof(*evt));
 
-#if HAVE_KQUEUE
-	struct kevent   kev;
-	int rc;
-
-	/* Wait for an event notification from the kernel */
-	rc = kevent(ctl->fd, &kev, 0, &kev, 1, NULL);
-	if (rc < 0) {
-		warn("kevent(2) failed");
+	/* Wait for a kernel event */
+	if (sys_get_event(evt, ctl) < 0) 
 		return -1;
-	}
-	if (kev.flags & EV_ERROR) {
-		evt->mask = EV_ERROR;
-		return 0;
-	}
-	/* Find the matching watch structure */
-	LIST_FOREACH(watchp, &ctl->watch, entries) {
-		if (watchp->fd == kev.ident)
-			break;
-	}
-	if (!watchp) {
-		warn("watch not found for event");
-		goto retry_wait;
-	}
-
-	/* Convert the kqueue(4) flags to pnotify_event flags */
-	if (!watchp->is_dir) {
-		if (kev.fflags & NOTE_WRITE)
-			evt->mask |= PN_MODIFY;
-		if (kev.fflags & NOTE_TRUNCATE)
-			evt->mask |= PN_MODIFY;
-		if (kev.fflags & NOTE_EXTEND)
-			evt->mask |= PN_MODIFY;
-#if TODO
-		// not implemented yet
-		if (kev.fflags & NOTE_ATTRIB)
-			evt->mask |= PN_ATTRIB;
-#endif
-		if (kev.fflags & NOTE_DELETE)
-			evt->mask |= PN_DELETE;
-
-		/* Construct a pnotify_event structure */
-		if ((evp = calloc(1, sizeof(*evp))) == NULL) {
-			warn("malloc failed");
-			return -1;
-		}
-
-		/* Add the event to the list of pending events */
-		memcpy(evp, evt, sizeof(*evp));
-		STAILQ_INSERT_TAIL(&ctl->event, evp, entries);
-	
-	} else {
-
-		/* When a file is added or deleted, NOTE_WRITE is set */
-		if (kev.fflags & NOTE_WRITE) {
-			if (kq_directory_event_handler(kev, ctl, watchp) < 0) {
-				warn("error processing diretory");
-				return -1;
-			}
-		}
-		/* FIXME: Handle the deletion of a watched directory */
-		else if (kev.fflags & NOTE_DELETE) {
-				warn("unimplemented - TODO");
-				return -1;
-		} else {
-				warn("unknown event recieved");
-				return -1;
-		}
-
-	}
-
-#elif HAVE_INOTIFY
-
-	struct inotify_event *iev, *endp;
-	ssize_t         bytes;
-	char            buf[4096];
-
-retry:
-
-	/* Read the event structure */
-	bytes = read(ctl->fd, &buf, sizeof(buf));
-	if (bytes <= 0) {
-		if (errno == EINTR)
-			goto retry;
-		else
-			perror("read(2)");
-
-		return -1;
-	}
-	/* Compute the beginning and end of the event list */
-	iev = (struct inotify_event *) & buf;
-	endp = iev + bytes;
-
-	/* Process each pending event */
-	while (iev < endp) {
-
-		/* XXX-WORKAROUND */
-		if (iev->wd == 0)
-			break;
-
-		/* Find the matching watch structure */
-		LIST_FOREACH(watchp, &ctl->watch, entries) {
-			if (watchp->wd == iev->wd)
-				break;
-		}
-		if (!watchp) {
-			warn("watch # %d not found", iev->wd);
-			return -1;
-		}
-		/* Construct a pnotify_event structure */
-		if ((evp = calloc(1, sizeof(*evp))) == NULL) {
-			warn("malloc failed");
-			return -1;
-		}
-		evp->wd = watchp->wd;
-		(void) strncpy(evp->name, iev->name, iev->len);
-		if (iev->mask & IN_ACCESS)
-			evp->mask |= PN_ACCESS;
-#if TODO
-	// not implemented
-		if (iev->mask & IN_ATTRIB)
-			evp->mask |= PN_ATTRIB;
-#endif
-		if (iev->mask & IN_MODIFY)
-			evp->mask |= PN_MODIFY;
-		if (iev->mask & IN_CREATE)
-			evp->mask |= PN_CREATE;
-		if (iev->mask & IN_DELETE)
-			evp->mask |= PN_DELETE;
-		if (iev->mask & IN_DELETE_SELF) {
-			evp->mask |= PN_DELETE;
-			(void) strncpy(evp->name, "", 0);
-		}
-
-		/* Add the event to the list of pending events */
-		STAILQ_INSERT_TAIL(&ctl->event, evp, entries);
-
-		/* Go to the next event */
-		iev += sizeof(*iev) + iev->len;
-	}
-
-#else
-#error STUB
-#endif
 
 next_event:
 
@@ -522,9 +616,12 @@ pnotify_free(struct pnotify_cb *ctl)
 	assert(ctl != NULL);
 
 	/* Delete all watches */
-	LIST_FOREACH(watch, &ctl->watch, entries) {
-		LIST_REMOVE(watch, entries);
-		free(watch);
+	while (!LIST_EMPTY(&ctl->watch)) {
+		watch = LIST_FIRST(&ctl->watch);
+		if (pnotify_rm_watch(ctl, watch->wd) < 0) {
+			warn("error removing watch");
+			return -1;
+		}
 	}
 
 	/* Delete all pending events */
@@ -552,83 +649,167 @@ pnotify_free(struct pnotify_cb *ctl)
 #if HAVE_KQUEUE
 
 /**
+ Open a watched directory.
+*/
+static int
+directory_open(struct pnotify_cb *ctl, struct pnotify_watch * watch)
+{
+	struct directory * dir;
+
+	dir = &watch->dir;
+
+	/* Initialize the li_directory structure */
+	LIST_INIT(&dir->all);
+	if ((dir->dirp = opendir(watch->path)) == NULL) {
+		perror("opendir(2)");
+		return -1;
+	}
+
+	/* Store the pathname */
+	dir->path_len = strlen(watch->path);
+	if ((dir->path_len >= PATH_MAX) || 
+		((dir->path = malloc(dir->path_len + 1)) == NULL)) {
+			perror("malloc(3)");
+			return -1;
+	}
+	strncpy(dir->path, watch->path, dir->path_len);
+		
+	/* Scan the directory */
+	if (directory_scan(ctl, watch) < 0) {
+		warn("directory_scan failed");
+		return -1;
+	}
+
+	return 0;
+}
+
+
+/**
  Scan a directory looking for new, modified, and deleted files.
  */
 static int
-scan_directory(struct directory * dir, int fd)
+directory_scan(struct pnotify_cb *ctl, struct pnotify_watch * watch)
 {
-	char           *buf, *ebuf, *cp;
-	long            base;
-	size_t          bufsize;
-	int             nbytes;
-	struct stat     sb;
-	struct dirent  *dp;
-	struct dentry  *dentry, *dptr, *dtmp;
+	struct pnotify_watch *wtmp;
+	struct directory *dir;
+	struct dirent   ent, *entp;
+	struct dentry  *dptr;
 	bool            found;
+	char            path[PATH_MAX + 1];
+	char           *cp;
+	struct stat	st;
 
-	assert(dir != NULL);
+	assert(watch != NULL);
 
-	/* Delete all entries from the 'deleted' list */
-	if (!LIST_EMPTY(&dir->del)) {
-		dptr = LIST_FIRST(&dir->del);
-		while (dptr != NULL) {
-			dtmp = LIST_NEXT(dptr, entries);
-			free(dptr);
-			dptr = dtmp;
+	dir = &watch->dir;
+
+	dprintf("scanning directory\n");
+
+	/* Generate the basename */
+	(void) snprintf((char *) &path, PATH_MAX, "%s/", dir->path);
+	cp = path + dir->path_len + 1;
+
+	/* 
+	 * Invalidate the status mask for all entries.
+	 *  This is used to detect entries that have been deleted.
+ 	 */
+	LIST_FOREACH(dptr, &dir->all, entries) {
+		dptr->mask = PN_DELETE;
+	}
+
+	/* Skip the initial '.' and '..' entries */
+	/* XXX-FIXME doesnt work with chroot(2) when '..' doesn't exist */
+	rewinddir(dir->dirp);
+	if (readdir_r(dir->dirp, &ent, &entp) != 0) {
+		perror("readdir_r(3)");
+		return -1;
+	}
+	if (strcmp(ent.d_name, ".") == 0) {
+		if (readdir_r(dir->dirp, &ent, &entp) != 0) {
+			perror("readdir_r(3)");
+			return -1;
 		}
 	}
 
-	/* Compute the buffer size and allocate a buffer */
-	if (fstat(fd, &sb) < 0)
-		err(2, "fstat");
-	bufsize = sb.st_size;
-	if (bufsize < sb.st_blksize)
-		bufsize = sb.st_blksize;
-	if ((buf = malloc(bufsize)) == NULL)
-		err(2, "cannot malloc %lu bytes", (unsigned long) bufsize);
+	/* Read all entries in the directory */
+	for (;;) {
 
-	/* Read the entire directory using buffer-sized chunks */
-	(void) lseek(fd, 0, SEEK_SET);
-	while ((nbytes = getdirentries(fd, buf, bufsize, &base)) > 0) {
-		ebuf = buf + nbytes;
-		cp = buf;
-		while (cp < ebuf) {
-			dp = (struct dirent *) cp;
+		/* Read the next entry */
+		if (readdir_r(dir->dirp, &ent, &entp) != 0) {
+			perror("readdir_r(3)");
+			return -1;
+		}
 
-			/* Perform a linear search for the dentry */
-			found = false;
-			LIST_FOREACH(dptr, &dir->all, entries) {
-				/*
-				 * BUG - this doesnt handle hardlinks which
-				 * have the same d_fileno but different
-				 * dirent structs
-				 */
-				//should compare the entire dirent struct...
+		/* Check for the end-of-directory condition */
+		if (entp == NULL)
+			break;
+ 
+		/* Perform a linear search for the dentry */
+		found = false;
+		LIST_FOREACH(dptr, &dir->all, entries) {
 
-				if (dptr->ent.d_fileno == dp->d_fileno) {
-					dprintf("old entry: %s\n", dp->d_name);
-					found = true;
-					break;
-				}
+			/*
+			 * BUG - this doesnt handle hardlinks which
+			 * have the same d_fileno but different
+			 * dirent structs
+			 */
+			//should compare the entire dirent struct...
+			if (dptr->ent.d_fileno != ent.d_fileno) 
+				continue;
+
+			dprintf("old entry: %s\n", ent.d_name);
+			dptr->mask = 0;
+
+			/* Generate the full pathname */
+			// BUG: name_max is not precise enough
+			strncpy(cp, ent.d_name, NAME_MAX);
+
+			/* Check the mtime and atime */
+			if (stat((char *) &path, &st) < 0) {
+				perror("stat(2)");
+				return -1;
 			}
 
-			/* Add the entry to the 'new' list if needed */
-			if (!found) {
-				dprintf("new entry: %s\n", dp->d_name);
-				dentry = malloc(sizeof(*dentry));
-				if (dentry == NULL)
-					err(2, "cannot malloc %lu bytes",
-					    (unsigned long) bufsize);
-				memcpy(&dentry->ent, dp, sizeof(struct dirent));
+			found = true;
+			break;
+		}
 
-				LIST_INSERT_HEAD(&dir->all, dentry, entries);
-				LIST_INSERT_HEAD(&dir->new, dentry, entries);
+		/* Add the entry to the list, if needed */
+		if (!found) {
+			dprintf("new entry: %s\n", ent.d_name);
+
+			/* Allocate a new dentry structure */
+			if ((dptr = malloc(sizeof(*dptr))) == NULL) {
+				perror("malloc(3)");
+				return -1;
 			}
-			cp += dp->d_reclen;
+
+			/* Copy the dirent structure */
+			memcpy(&dptr->ent, &ent, sizeof(ent));
+			dptr->mask = PN_CREATE;
+
+			/* Generate the full pathname */
+			// BUG: name_max is not precise enough
+			strncpy(cp, ent.d_name, NAME_MAX);
+
+			/* Get the file status */
+			if (stat((char *) &path, &st) < 0) {
+				perror("stat(2)");
+				return -1;
+			}
+
+			/* Add a watch if it is a regular file */
+			if (S_ISREG(st.st_mode)) {
+				if (pnotify_add_watch(ctl, path, 
+					watch->mask) < 0)
+						return -1;
+				wtmp = LIST_FIRST(&ctl->watch);
+				wtmp->parent_wd = watch->wd;
+			}
+
+			LIST_INSERT_HEAD(&dir->all, dptr, entries);
 		}
 	}
-	if (nbytes < 0)
-		err(2, "getdirentries");
 
 	return 0;
 }
@@ -648,14 +829,18 @@ kq_directory_event_handler(struct kevent kev,
 
 	assert(ctl && watch);
 
-
 	/* Re-scan the directory to find new and deleted files */
-	if (scan_directory(&watch->dir, watch->fd) < 0)
-		err(3, "scan_directory failed");
+	if (directory_scan(ctl, watch) < 0) {
+		warn("directory_scan failed");
+		return -1;
+	}
 
-	/* Generate an event for each 'new' file */
-	dptr = LIST_FIRST(&watch->dir.new);
-	while (dptr != NULL) {
+	/* Generate an event for each changed directory entry */
+	LIST_FOREACH_SAFE(dptr, &watch->dir.all, entries, dtmp) {
+
+		/* Skip files that have not changed */
+		if (dptr->mask == 0)
+			continue;
 
 		/* Construct a pnotify_event structure */
 		if ((ev = calloc(1, sizeof(*ev))) == NULL) {
@@ -663,23 +848,19 @@ kq_directory_event_handler(struct kevent kev,
 			return -1;
 		}
 		ev->wd = watch->wd;
-		ev->mask = PN_CREATE;
+		ev->mask = dptr->mask;
 		(void) strlcpy(ev->name, dptr->ent.d_name, sizeof(ev->name));
+		dprint_event(ev);
 
 		/* Add the event to the list of pending events */
 		STAILQ_INSERT_TAIL(&ctl->event, ev, entries);
 
-		/* Remove the entry from the 'new' file list */
-		dtmp = LIST_NEXT(dptr, entries);
-		free(dptr);
-		dptr = dtmp;
+		/* Remove the directory entry for a deleted file */
+		if (dptr->mask & PN_DELETE) {
+			LIST_REMOVE(dptr, entries);
+			free(dptr);
+		}
 	}
-
-	/* XXX - FIXME */
-
-	/** @todo Generate an event for each 'deleted' file */
-
-	/** @todo Generate an event for each 'modified' file */
 
 	return 0;
 }

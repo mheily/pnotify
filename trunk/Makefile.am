@@ -16,12 +16,13 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-include_HEADERS=	pnotify.h
-lib_LIBRARIES=		libpnotify.a
 libpnotify_a_SOURCES=	pnotify.c
+include_HEADERS=	pnotify.h
+noinst_HEADERS=		queue.h
+lib_LIBRARIES=		libpnotify.a
 libpnotify_a_CFLAGS=	-O2 -g -Wall
 dist_man3_MANS=		pnotify.3
-EXTRA_DIST=		index.html
+EXTRA_DIST=		index.html 
 
 #
 # Unit testing program
