@@ -210,6 +210,8 @@ kq_rm_watch(struct pnotify_cb *ctl, struct pnotify_watch *watch)
 			return -1;
 		}
 	}
+
+	return 0;
 }
 
 static inline int
