@@ -751,7 +751,7 @@ directory_scan(struct pnotify_cb *ctl, struct pnotify_watch * watch)
 		LIST_FOREACH(dptr, &dir->all, entries) {
 
 			/*
-			 * BUG - this doesnt handle hardlinks which
+			 * FIXME - BUG - this doesnt handle hardlinks which
 			 * have the same d_fileno but different
 			 * dirent structs
 			 */
@@ -761,16 +761,6 @@ directory_scan(struct pnotify_cb *ctl, struct pnotify_watch * watch)
 
 			dprintf("old entry: %s\n", ent.d_name);
 			dptr->mask = 0;
-
-			/* Generate the full pathname */
-			// BUG: name_max is not precise enough
-			strncpy(cp, ent.d_name, NAME_MAX);
-
-			/* Check the mtime and atime */
-			if (stat((char *) &path, &st) < 0) {
-				perror("stat(2)");
-				return -1;
-			}
 
 			found = true;
 			break;
@@ -796,7 +786,7 @@ directory_scan(struct pnotify_cb *ctl, struct pnotify_watch * watch)
 
 			/* Get the file status */
 			if (stat((char *) &path, &st) < 0) {
-				perror("stat(2)");
+				warn("stat(2) of `%s' failed", (char *) &path);
 				return -1;
 			}
 
