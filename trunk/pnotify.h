@@ -19,143 +19,87 @@
 #ifndef _PNOTIFY_H
 #define _PNOTIFY_H
 
+/** @file
+ *
+ *  Public header for the pnotify library.
+ *
+*/
+
 #include <dirent.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <limits.h>
+#include <sys/time.h>
 
 /* kqueue(4) in MacOS/X does not support NOTE_TRUNCATE */
 #ifndef NOTE_TRUNCATE
 # define NOTE_TRUNCATE 0
 #endif
 
+/* Opaque structures */
+struct pnotify_event;
+struct pnotify_ctx;
 
-/* 
- Some implementations of <sys/queue.h> do not include
- the STAILQ_* macros, so they are defined here as needed.
- These were taken from FreeBSD 6.2's queue.h.
-*/
 
-#ifndef LIST_HEAD
-#define	LIST_HEAD(name, type)						\
-struct name {								\
-	struct type *lh_first;	/* first element */			\
-}
-#endif
+/** The type of resource to be watched */
+enum pn_watch_type {
+	/** A vnode in the filesystem */
+	WATCH_VNODE = 0,
 
-#ifndef LIST_ENTRY
-#define	LIST_ENTRY(type)						\
-struct {								\
-	struct type *le_next;	/* next element */			\
-	struct type **le_prev;	/* address of previous next element */	\
-}
-#endif
+	/** An open file descriptor */
+	WATCH_FD,
 
-#ifndef STAILQ_HEAD
-#define	STAILQ_HEAD(name, type)						\
-struct name {								\
-	struct type *stqh_first;/* first element */			\
-	struct type **stqh_last;/* addr of last next element */		\
-}
-#endif
+	/** A user-defined timer */
+	WATCH_TIMER,
 
-#ifndef STAILQ_ENTRY
-#define	STAILQ_ENTRY(type)						\
-struct {								\
-	struct type *stqe_next;	/* next element */			\
-}
-#endif
-
-/** pnotify control block 
-
-This structure MUST NOT be shared by multiple threads.
-
-*/
-struct pnotify_cb {
-
-	/** Kernel event descriptor as returned by kqueue(4) or inotify_init(7) */
-	int	fd;
-
-	/** A list of watched files and/or directories */
-	LIST_HEAD(, pnotify_watch) watch;
-
-	/** A list of events that are ready to be delivered */
-	STAILQ_HEAD(, pnotify_event) event;
-
-	/** A counter used to assign unique watch IDs for pnotify_add_watch() */
-	unsigned int next_wd;
+	/** Signals from the operating system */
+	WATCH_SIGNAL,
+	
+	/** User-defined asynchronous function call */
+	WATCH_FUNCTION
 };
 
-/**
-  Initialize a pnotify control block.
 
-  The control block contains the current state of events and watches. 
-  Before adding watches, the control block must be initialized via
-  a call to pnotify_new(). 
+/** A unique resource identifier */
+union pn_resource_id {
+	/** An open file descriptor
+	 *
+	 * Can receive PN_READ | PN_WRITE | PN_CLOSE events
+	 */ 
+	int fd;
 
-  @param ctl pointer to a control block
-  @return 0 if successful, or non-zero if an error occurred.
-*/
-int pnotify_init(struct pnotify_cb *ctl);
+	/**
+	 * A signal number
+	 *
+	 * When received, creates a PN_SIGNAL event.
+	 */
+	int signum;
 
+	/**
+	 * A timer interval (in seconds)
+	 *
+	 * When the interval elapses, a PN_TIMER event is created.
+	 */
+	int interval;
 
-/**
-  Add a watch.
-
-  @param ctl a pnotify control block
-  @param path full pathname of the file or directory to be watched
-  @param mask a bitmask of events to be monitored
-  @return a unique watch descriptor if successful, or -1 if an error occurred.
-*/
-int pnotify_add_watch(struct pnotify_cb *ctl, const char *pathname, int mask);
-
-
-/**
-  Remove a watch.
-
-  @param ctl a pnotify control block
-  @param wd FIXME --- WONT WORK
-  @return 0 if successful, or non-zero if an error occurred.
-*/
-int pnotify_rm_watch(struct pnotify_cb *ctl, int wd);
-
-
-/**
-  Wait for an event to occur.
-
-  @param evt an event structure that will store the result
-  @param ctl a pnotify control block
-  @return 0 if successful, or non-zero if an error occurred.
-*/
-int pnotify_get_event(struct pnotify_event *evt, struct pnotify_cb *ctl);
+	/**
+	 * A file or directory
+	 *
+	 * When changes are made to the file/directory,
+	 * various events are generated.
+	 */
+	char *path;
+};
 
 
-/**
- Print debugging information about an event to standard output.
- @param evt an event to be printed
-*/
-int pnotify_print_event(struct pnotify_event * evt);
+/** The bitmask of events to monitor */
+enum pn_event_bitmask {
 
+	/** Use the default settings when creating a watch */
+	PN_DEFAULT              = 0,
 
-/**
- Print the contents of the control block to standard output.
-*/
-void pnotify_dump(struct pnotify_cb *ctl);
-
-/**
-  Free all resources associated with an event queue.
-
-  All internal data structures will be freed. 
-
-  @return 0 if successful, or non-zero if an error occurred.
-*/
-int pnotify_free(struct pnotify_cb *ctl);
-
-
-/** Event flags */
-enum {
-
-	/** The atime of a file has been modified */
-	PN_ACCESS 		= 0x1 << 0,
+	/** The attributes of a file have been modified */
+	PN_ATTRIB 		= 0x1 << 0,
 
 	/** A file was created in a watched directory */
 	PN_CREATE		= 0x1 << 1,
@@ -163,39 +107,155 @@ enum {
 	/** A file was deleted from a watched directory */
 	PN_DELETE		= 0x1 << 2,
 
-	/** The modification time of a file has changed */
+	/** The contents of a file have changed */
 	PN_MODIFY		= 0x1 << 3,
-	
-	/** Automatically delete the watch after a matching event occurs */
-	PN_ONESHOT		= 0x1 << 4,
+
+	/** Data is ready to be read from a file descriptor */
+	PN_READ                 = 0x1 << 4,
+
+	/** Data is ready to be written to a file descriptor */
+	PN_WRITE                = 0x1 << 5,
+
+	/** A socket or pipe descriptor was closed by the remote end */
+	PN_CLOSE                = 0x1 << 6,
+
+	/** A timer expired */
+	PN_TIMEOUT              = 0x1 << 7,  
+
+	/** A signal was received */
+	PN_SIGNAL               = 0x1 << 8,  
+
+	/** Delete the watch after a matching event occurs */
+	PN_ONESHOT		= 0x1 << 30,
 
 	/** An error condition in the underlying kernel event queue */
-	PN_ERROR		= 0x1 << 5,
+	PN_ERROR		= 0x1 << 31,
 
-} __PN_BITMASK;
-
-#define PN_ALL_EVENTS	(PN_ACCESS | PN_CREATE | PN_DELETE | PN_MODIFY)
-
-/** An event */
-struct pnotify_event {
-
-	/** The watch descriptor returned by pnotify_add_watch() */
-	int       wd;
-
-	/** The parent watch descriptor, when monitoring files
- 	    within a directory using kqueue(4). If no parent, this is zero.
-	*/
-	int 	  parent;
-
-	/** One or more bitflags containing the event(s) that occurred */
-	int       mask;
-
-	/** The filename associated with a directory entry creation/deletion.
-		Only used when monitoring directories.
-	*/
-        char      name[NAME_MAX + 1];
-
-	STAILQ_ENTRY(pnotify_event) entries;
 };
 
-#endif
+
+/**
+ * A watch request.
+ *
+ * @see pn_watch, used internally to track each watch
+ */
+struct pnotify_watch {
+
+	/** The type of resource to be watched */
+	enum pn_watch_type type;
+
+	/** Bitmask containing a union of all events to be monitored */
+	enum pn_event_bitmask mask;
+
+	/** The resource ID */
+	union pn_resource_id ident;
+
+};
+
+
+/**
+  Initialize a pnotify event queue.
+
+  Before adding watches, the queue must be initialized via
+  a call to pnotify_init(). 
+
+  @return pointer to a new pnotify context, or NULL if an error occurred.
+*/
+struct pnotify_ctx * pnotify_init();
+
+/**
+  Add a watch.
+
+  @param ctx a context returned by pnotify_init() or NULL for the current context
+  @param watch a watch structure
+  @return a unique watch descriptor if successful, or -1 if an error occurred.
+*/
+int pnotify_add_watch(struct pnotify_ctx *ctx, const struct pnotify_watch *watch);
+
+/**
+  Remove a watch.
+
+  @param ctx a context returned by pnotify_init() or NULL for the current context
+  @param wd watch descriptor
+  @return 0 if successful, or non-zero if an error occurred.
+*/
+int pnotify_rm_watch(struct pnotify_ctx *, int wd);
+
+
+/**
+  Wait for an event to occur.
+
+  @param evt an event structure that will store the result
+  @param ctx a context returned by pnotify_init() or NULL for the current context
+  @return 0 if successful, or non-zero if an error occurred.
+*/
+int pnotify_get_event(struct pnotify_event *, struct pnotify_ctx *);
+
+/**
+ * Wait for events and dispatch callbacks.
+ *
+ * @return -1 if an error occurs, otherwise the function does not return
+*/
+int pnotify_dispatch();
+
+/**
+ Print debugging information about an event to standard output.
+ @param evt an event to be printed
+*/
+int pnotify_print_event(struct pnotify_event *);
+
+
+/**
+ Print the context to standard output.
+*/
+void pnotify_dump(struct pnotify_ctx *);
+
+/**
+  Free all resources associated with an event queue.
+
+  All internal data structures will be freed. 
+
+  @param ctx a context returned by pnotify_init() or NULL for the current context
+  @return 0 if successful, or non-zero if an error occurred.
+*/
+void pnotify_free(struct pnotify_ctx *ctx);
+
+/** Trap a specific signal and generate an event when it is received.
+ *
+ * When a signal is trapped, it is no longer delivered to the program
+ * and is converted into an event instead.
+ *
+ * @param signum the signal to be trapped
+ * @return a watch descriptor, or -1 if an error occurred
+ */ 
+int pnotify_trap_signal(int signum); 
+
+/** Watch for changes to a vnode 
+ *
+ * @param path the path to a file or directory to be monitored
+ * @param mask a bitmask of events to monitor
+ * @return a watch descriptor, or -1 if an error occurred
+ */ 
+int pnotify_watch_vnode(const char *path, int mask); 
+
+/** Watch for changes to a file descriptor */
+int pnotify_watch_fd(int fd, int mask); 
+
+/** Set a timer to fire after specific number of seconds 
+ *
+ * If the mask is set to PN_ONESHOT, the timer will be automatically
+ * deleted after one occurrance. If the mask is PN_DEFAULT,
+ * the timer will repeat forever.
+ *
+ * @param interval the number of seconds between timer events
+ * @param mask either PN_DEFAULT or PN_ONESHOT
+ */
+int pnotify_set_timer(int interval, int mask);
+
+/** Invoke a function asynchronously and generate an event when it returns.
+ *
+ * @param mask either PN_DEFAULT or PN_ONESHOT
+ */
+int pnotify_call_function(int (*func)(), size_t nargs, ...);
+
+#endif /* _PNOTIFY_H */

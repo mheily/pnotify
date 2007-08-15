@@ -16,21 +16,25 @@
 # OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
 #
 
-libpnotify_a_SOURCES=	pnotify.c
+lib_LTLIBRARIES=	libpnotify.la
 include_HEADERS=	pnotify.h
-noinst_HEADERS=		queue.h
-lib_LIBRARIES=		libpnotify.a
-libpnotify_a_CFLAGS=	-O2 -g -Wall
+noinst_HEADERS=		queue.h pnotify-internal.h thread.h
 dist_man3_MANS=		pnotify.3
-EXTRA_DIST=		index.html 
+EXTRA_DIST=		index.html Doxyfile
+
+libpnotify_la_SOURCES=	pnotify.c signal.c timer.c \
+                        bsd.c linux.c
+libpnotify_la_CFLAGS=	-O2 -g -Wall -D_REENTRANT
+libpnotify_la_LDFLAGS=  -lpthread -lrt
 
 #
 # Unit testing program
 # 
 TESTS=			test
 check_PROGRAMS=		test
-test_SOURCES=		test.c pnotify.c
-test_CFLAGS=		-DPNOTIFY_DEBUG=1
+test_SOURCES=		test.c
+test_LDADD=		.libs/libpnotify.a -lpthread
+test_CFLAGS=		-DPNOTIFY_DEBUG=1 -D_REENTRANT
 
 # Preview the manpage in the current terminal window
 preview-man:

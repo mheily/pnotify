@@ -9,11 +9,10 @@
 .Sh SYNOPSIS
 .In pnotify.h
 .Pp
-.Fd int pnotify_init(struct pnotify_cb *ctl);
-.Fd int pnotify_add_watch(struct pnotify_cb *ctl, const char *pathname, int mask);
-.Fd int pnotify_rm_watch(struct pnotify_cb *ctl, int wd);
-.Fd int pnotify_get_event(struct pnotify_event *evt, struct pnotify_cb *ctl);
-.Fd int pnotify_free(struct pnotify_cb *ctl);
+.Fd int pnotify_init();
+.Fd int pnotify_add_watch(const char *pathname, int mask);
+.Fd int pnotify_rm_watch(int wd);
+.Fd int pnotify_get_event(struct pnotify_event *evt);
 .Pp
 .Bd -literal
 struct pnotify_event {
@@ -31,7 +30,7 @@ the inotify(7) kernel subsystem in Linux, but is implemented as a userspace libr
 to support other kernel mechanisms such as kqueue(4).
 .Pp
 .Fn pnotify_init
-initializes a pnotify control block.  This structure contains the current state of events and watches, and must be initialized before it can be used.
+initializes the event queue, and must be called before any of the other pnotify functions.
 .Pp
 .Fn pnotify_add_watch
 adds a watch for a given file or directory. The mask parameter is composed of one
@@ -59,10 +58,6 @@ blocks until an event occurs, and fills the pnotify_event structure with informa
 about the event.  If an error occurs in the underlying kernel event queue, an
 event is returned with the PN_ERROR flag set.
 
-.Fn pnotify_free
-frees all of the memory associated with a control block and closes the kernel event
-descriptor.
-
 .Sh RETURN VALUES
 .Fn pnotify_add_watch
 returns a positive integer that represents a unique watch descriptor, or -1 if an error occurs.
@@ -73,12 +68,11 @@ All other functions return zero if successful, or -1 if an error occurs.
 The following example creates a watch on the /tmp directory and prints the 
 names of files that are created or deleted within the directory.
 .Bd -literal
-struct pnotify_cb ctl;
 struct pnotify_event evt;
 
-pnotify_init(&ctl);
-pnotify_add_watch(&ctl, "/tmp", PN_ALL_EVENTS);
-while (pnotify_get_event(&evt, &ctl, NULL) == 0) {
+pnotify_init();
+pnotify_add_watch("/tmp", PN_ALL_EVENTS);
+while (pnotify_get_event(&evt) == 0) {
 	if (evt.mask & PN_CREATE) 
 		printf("file created: %s", evt.name);
 	if (evt.mask & PN_DELETE) 
@@ -88,17 +82,16 @@ while (pnotify_get_event(&evt, &ctl, NULL) == 0) {
 		break;
 	}
 }
-pnotify_free(&ctl);
 .Ed
 
 .Sh THREADSAFETY
-All
+To use
 .Nm
-functions are fully reentrant and may be used in multithreaded programs. 
-A single
-.Nm
-control block (struct pnotify_cb) should not be shared by multiple threads
-unless it is protected by a mutex.
+in a threaded program, link with `libpnotify_r` instead of `libpnotify`. 
+All of the function calls are the same. Each thread has it's own 
+event queue, so you must call
+.Fn pnotify_init
+as part of each thread's initialization routine.
 
 .Sh SEE ALSO
 .Xr kqueue 4
