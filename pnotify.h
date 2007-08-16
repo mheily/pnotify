@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <limits.h>
 #include <sys/time.h>
+#include <stdarg.h>
 
 /* kqueue(4) in MacOS/X does not support NOTE_TRUNCATE */
 #ifndef NOTE_TRUNCATE
@@ -150,6 +151,18 @@ struct pnotify_watch {
 	/** The resource ID */
 	union pn_resource_id ident;
 
+	/** A callback to be invoked when a matching event occurs
+	 *
+	 * Parameters passed to the function are:
+	 *     - the resource identifier from the watch structure
+	 *     - the mask of events which occurred
+	 *     - an opaque pointer to `arg' 
+	 */
+	void (*cb)();
+	void *arg;
+
+	/** The context that receives the event */
+	struct pnotify_ctx *ctx;
 };
 
 
@@ -166,20 +179,18 @@ struct pnotify_ctx * pnotify_init();
 /**
   Add a watch.
 
-  @param ctx a context returned by pnotify_init() or NULL for the current context
   @param watch a watch structure
   @return a unique watch descriptor if successful, or -1 if an error occurred.
 */
-int pnotify_add_watch(struct pnotify_ctx *ctx, const struct pnotify_watch *watch);
+int pnotify_add_watch(struct pnotify_watch *watch);
 
 /**
   Remove a watch.
 
-  @param ctx a context returned by pnotify_init() or NULL for the current context
   @param wd watch descriptor
   @return 0 if successful, or non-zero if an error occurred.
 */
-int pnotify_rm_watch(struct pnotify_ctx *, int wd);
+int pnotify_rm_watch(int wd);
 
 
 /**
@@ -228,7 +239,7 @@ void pnotify_free(struct pnotify_ctx *ctx);
  * @param signum the signal to be trapped
  * @return a watch descriptor, or -1 if an error occurred
  */ 
-int pnotify_trap_signal(int signum); 
+int pnotify_trap_signal(int signum, void (*cb)(), void *arg);
 
 /** Watch for changes to a vnode 
  *
@@ -236,10 +247,10 @@ int pnotify_trap_signal(int signum);
  * @param mask a bitmask of events to monitor
  * @return a watch descriptor, or -1 if an error occurred
  */ 
-int pnotify_watch_vnode(const char *path, int mask); 
+int pnotify_watch_vnode(const char *path, int mask, void (*cb)(), void *arg);
 
 /** Watch for changes to a file descriptor */
-int pnotify_watch_fd(int fd, int mask); 
+int pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg); 
 
 /** Set a timer to fire after specific number of seconds 
  *
@@ -250,12 +261,16 @@ int pnotify_watch_fd(int fd, int mask);
  * @param interval the number of seconds between timer events
  * @param mask either PN_DEFAULT or PN_ONESHOT
  */
-int pnotify_set_timer(int interval, int mask);
+int pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg);
 
+#if TODO
+	// experimental
+	
 /** Invoke a function asynchronously and generate an event when it returns.
  *
  * @param mask either PN_DEFAULT or PN_ONESHOT
  */
 int pnotify_call_function(int (*func)(), size_t nargs, ...);
+#endif
 
 #endif /* _PNOTIFY_H */

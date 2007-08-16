@@ -161,7 +161,7 @@ pnotify_init()
 
 
 int
-pnotify_add_watch(struct pnotify_ctx *ctx, const struct pnotify_watch *watch)
+pnotify_add_watch(struct pnotify_watch *watch)
 {
 	static int next_wd = 100;
 	static pthread_mutex_t next_wd_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -169,8 +169,8 @@ pnotify_add_watch(struct pnotify_ctx *ctx, const struct pnotify_watch *watch)
 	size_t len;
 
 	/* Get the context */
-	if (!ctx)
-		ctx = CTX_GET();
+	if (!watch->ctx)
+		watch->ctx = CTX_GET();
 
 	/* Allocate a new entry */
 	if ((_watch = malloc(sizeof(*_watch))) == NULL) {
@@ -219,10 +219,12 @@ pnotify_add_watch(struct pnotify_ctx *ctx, const struct pnotify_watch *watch)
 	/* Copy the other watch fields */
 	_watch->type = watch->type;
 	_watch->mask = watch->mask;
-	_watch->ctx = ctx;
+	_watch->cb = watch->cb;
+	_watch->arg = watch->arg;
+	_watch->ctx = watch->ctx;
 
 	/* Register the watch with the kernel */
-	if (sys->add_watch(ctx, _watch) < 0) {
+	if (sys->add_watch(_watch) < 0) {
 		warn("adding watch failed");
 		//TODO: free(watch->ident.path);
 		free(_watch);
@@ -242,14 +244,10 @@ pnotify_add_watch(struct pnotify_ctx *ctx, const struct pnotify_watch *watch)
 
 
 int 
-pnotify_rm_watch(struct pnotify_ctx *ctx, int wd)
+pnotify_rm_watch(int wd)
 {
 	struct pn_watch *watchp, *wtmp;
 	int found = 0;
-
-	/* Get the context */
-	if (!ctx)
-		ctx = CTX_GET();
 
 	pthread_mutex_lock(&WATCH_MUTEX);
 
@@ -258,7 +256,7 @@ pnotify_rm_watch(struct pnotify_ctx *ctx, int wd)
 
 		/* Remove the parent watch and it's children */
 		if ((watchp->wd == wd) || (watchp->parent_wd == wd)) {
-			if (sys->rm_watch(ctx, watchp) < 0)
+			if (sys->rm_watch(watchp) < 0)
 				break;
 			switch (watchp->type) {
 				case WATCH_TIMER: 
@@ -399,32 +397,36 @@ pnotify_free(struct pnotify_ctx *ctx)
 /* -------- Convenience functions for pnotify_add_watch() ----------------- */
 
 int
-pnotify_watch_vnode(const char *path, int mask)
+pnotify_watch_vnode(const char *path, int mask, void (*cb)(), void *arg)
 {
 	struct pnotify_watch w;
 
 	w.type = WATCH_VNODE;
 	w.ident.path = (char *) path;
 	w.mask = mask;
+	w.cb = cb;
+	w.arg = arg;
 
-	return pnotify_add_watch(NULL, &w);
+	return pnotify_add_watch(&w);
 }
 
 
 int
-pnotify_watch_fd(int fd, int mask)
+pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg)
 {
 	struct pnotify_watch w;
 
 	w.type = WATCH_FD;
 	w.ident.fd = fd;
 	w.mask = mask;
+	w.cb = cb;
+	w.arg = arg;
 
-	return pnotify_add_watch(NULL, &w);
+	return pnotify_add_watch(&w);
 }
 
 int
-pnotify_set_timer(int interval, int mask)
+pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg)
 {
 	struct pnotify_watch w;
 	int wd;
@@ -433,7 +435,9 @@ pnotify_set_timer(int interval, int mask)
 	w.type = WATCH_TIMER;
 	w.ident.interval = interval;
 	w.mask = mask;
-	if ((wd = pnotify_add_watch(NULL, &w)) < 0) {
+	w.cb = cb;
+	w.arg = arg;
+	if ((wd = pnotify_add_watch(&w)) < 0) {
 		warnx("unable to add watch for timer");
 		return -1;
 	}
@@ -448,7 +452,7 @@ pnotify_set_timer(int interval, int mask)
 }
 
 int
-pnotify_trap_signal(int signum)
+pnotify_trap_signal(int signum, void (*cb)(), void *arg)
 {
 	struct pnotify_watch w;
 
@@ -459,8 +463,10 @@ pnotify_trap_signal(int signum)
 	w.type = WATCH_SIGNAL;
 	w.ident.signum = signum;
 	w.mask = PN_SIGNAL;
+	w.cb = cb;
+	w.arg = arg;
 
-	return pnotify_add_watch(NULL, &w);
+	return pnotify_add_watch(&w);
 }
 
 int pnotify_call_function(int (*func)(), size_t nargs, ...)
@@ -483,14 +489,16 @@ pnotify_dispatch()
 			return -1;
 
 		/* Ignore events that have no callback defined */
-		if (!evt.watch->fn) 
+		if (!evt.watch->cb) 
 			continue;
 			
 		if (evt.watch->type == WATCH_VNODE) {
 			//FIXME: need to copy path to caller
-			//*(evt->watch->fn)(evt->, 
+			//*(evt->watch->cb)(evt->, 
+		} else if (evt.watch->type == WATCH_TIMER) {
+			 evt.watch->cb(evt.mask, evt.watch->arg);
 		} else {
-			 evt.watch->fn(evt.watch->ident.fd, evt.mask, evt.watch->arg);
+			 evt.watch->cb(evt.watch->ident.fd, evt.mask, evt.watch->arg);
 		}
 
 	}
