@@ -45,7 +45,7 @@ test_signals()
 	struct pnotify_event    evt;
 
 	printf("signal tests\n");
-	test (pnotify_trap_signal(SIGUSR1));
+	test (pnotify_trap_signal(SIGUSR1, NULL, NULL));
 	test (kill(getpid(), SIGUSR1));
 	test (pnotify_get_event(&evt, ctx));
 	if (!event_cmp(&evt, SIGUSR1, PN_SIGNAL, NULL)) 
@@ -61,7 +61,7 @@ test_fd()
 
 	printf("fd tests\n");
 	test (pipe(fildes));
-	test ((wd = pnotify_watch_fd(fildes[0], PN_READ)));
+	test ((wd = pnotify_watch_fd(fildes[0], PN_READ, NULL, NULL)));
 	if (write(fildes[1], "a", 1) != 1)
 		err(1, "write(2)");
 	test (pnotify_get_event(&evt, ctx));
@@ -77,22 +77,21 @@ test_timer()
 	int wd;
 
 	printf("timer tests\n");
-	test ((wd = pnotify_set_timer(1, PN_DEFAULT)));
+	test ((wd = pnotify_set_timer(1, PN_DEFAULT, NULL, NULL)));
 	test (pnotify_get_event(&evt, ctx));
 	printf("timer tests complete\n");
 }
 
-static int
+static void 
 test_callback(int signum)
 {
 	printf("signum %d\n");
-	return 0;
 }
 
 static void
 test_dispatch()
 {
-	test (pnotify_set_callback(pnotify_trap_signal(SIGUSR2), test_callback));
+	test (pnotify_set_timer(1, PN_DEFAULT, test_callback, NULL));
 	test (pnotify_dispatch());
 }
 
@@ -115,10 +114,10 @@ main(int argc, char **argv)
 	test_signals();
 	test_fd();
 	test_timer();
-	//FIXME:test_dispatch();
+	/* Disabled: test_dispatch(); */
 
 	/* Watch for events in the test directory */
-	test((wd = pnotify_watch_vnode(".check", PN_CREATE | PN_DELETE | PN_MODIFY))); 
+	test((wd = pnotify_watch_vnode(".check", PN_CREATE | PN_DELETE | PN_MODIFY, NULL, NULL))); 
 
 	/* Create a new file */
 	test (system("touch .check/foo"));
@@ -153,7 +152,7 @@ main(int argc, char **argv)
 		err(1, "unexpected event value");
 
 	/* Remove the watch */
-	test (pnotify_rm_watch(ctx, wd));
+	test (pnotify_rm_watch(wd));
 		
 #if DEADWOOD
 	if ((fd = inotify_init()) < 0) 

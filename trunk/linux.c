@@ -32,13 +32,6 @@
 #include <sys/epoll.h>
 #include <sys/inotify.h>
 
-const struct pnotify_vtable LINUX_VTABLE = {
-	.init_once = linux_init_once,
-	.add_watch = linux_add_watch,
-	.rm_watch = linux_rm_watch,
-	.cleanup = linux_cleanup,
-};
-
 static int INOTIFY_FD = -1;
 static int EPOLL_FD = -1;
 
@@ -225,7 +218,7 @@ linux_cleanup(void)
 
 
 int
-linux_add_watch(struct pnotify_ctx *ctx, struct pn_watch *watch)
+linux_add_watch(struct pn_watch *watch)
 {
 	struct epoll_event *ev = &watch->epoll_evt;
 	int mask = watch->mask;
@@ -280,7 +273,7 @@ linux_add_watch(struct pnotify_ctx *ctx, struct pn_watch *watch)
 }
 
 int
-linux_rm_watch(struct pnotify_ctx *ctx, struct pn_watch *watch)
+linux_rm_watch(struct pn_watch *watch)
 {
 	if (inotify_rm_watch(INOTIFY_FD, watch->wd) < 0) {
 		perror("inotify_rm_watch(2)");
@@ -335,6 +328,13 @@ linux_dump_inotify_event(struct inotify_event *iev)
 	}
 	fprintf(stderr, "\n");
 }
+
+const struct pnotify_vtable LINUX_VTABLE = {
+	.init_once = linux_init_once,
+	.add_watch = linux_add_watch,
+	.rm_watch = linux_rm_watch,
+	.cleanup = linux_cleanup,
+};
 
 #endif
 
