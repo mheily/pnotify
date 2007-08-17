@@ -169,6 +169,9 @@ struct pn_watch {
 	/* The associated kernel event structure */
 	struct kevent    kev;
 
+	/* The pathname of the directory (only for directories) */
+	char path[PATH_MAX + 1];
+
 #elif __linux__
 
 	struct epoll_event epoll_evt;
