@@ -44,7 +44,8 @@ Supported Platforms
    pnotify has been ported to the following platforms:
      * Linux 2.6
      * OpenBSD 4.0
-     * NetBSD 3.0
+     * NetBSD 3.1
+     * FreeBSD 6.2
      * MacOS/X 10.4
 
    There are platforms that are not supported due to lack of developer
@@ -107,15 +108,15 @@ Related Links
 
 References
 
-   1. file://localhost/pnotify/manpage.html
+   1. file://localhost/home/mark/pnotify/manpage.html
    2. http://linux.die.net/man/7/inotify
-   3. file://localhost/pnotify/index.html#download
-   4. file://localhost/pnotify/index.html#docs
-   5. file://localhost/pnotify/index.html#mlist
+   3. file://localhost/home/mark/pnotify/index.html#download
+   4. file://localhost/home/mark/pnotify/index.html#docs
+   5. file://localhost/home/mark/pnotify/index.html#mlist
    6. http://code.google.com/p/pnotify/downloads/list
    7. http://pnotify.googlecode.com/svn/trunk/
-   8. file://localhost/pnotify/manpage.html
-   9. file://localhost/pnotify/manpage.ps
+   8. file://localhost/home/mark/pnotify/manpage.html
+   9. file://localhost/home/mark/pnotify/manpage.ps
   10. http://groups.google.com/group/pnotify/topics
   11. mailto:devel@heily.com
   12. http://oss.sgi.com/projects/fam/

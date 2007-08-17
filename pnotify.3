@@ -5,15 +5,95 @@
 .Os
 .Sh NAME
 .Nm pnotify
-.Nd monitor filesystem events
+.Nd event notification framework
 .Sh SYNOPSIS
 .In pnotify.h
 .Pp
 .Fd int pnotify_init();
-.Fd int pnotify_add_watch(const char *pathname, int mask);
+.Fd int pnotify_add_watch(struct pnotify_watch *watch);
 .Fd int pnotify_rm_watch(int wd);
-.Fd int pnotify_get_event(struct pnotify_event *evt);
+.Fd int pnotify_get_event(struct pnotify_event *event);
+.Fd int pnotify_dispatch();
+.Fd int pnotify_trap_signal(int signum, void (*cb)(), void *arg);
+.Fd int pnotify_watch_vnode(char *path, int mask, void (*cb)(), void *arg);
+.Fd int pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg); 
+.Fd int pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg);
+.Fd void pnotify_free();
 .Pp
+.Sh DESCRIPTION
+The
+.Nm
+library provides a portable event notification framework.
+.Pp
+.Fn pnotify_init
+initializes the event queue, and must be called before any of the other pnotify functions.
+.Fn pnotify_free
+releases all of the memory and resources used by 
+.Nm
+and destroys all watches and pending events.
+.Pp
+.Sh EVENTS
+The mask parameter is composed of one
+or more bitflags from the following list of events:
+.Bl -column "Flag" "Meaning" -offset indent
+.It Sy PN_ATTRIB Ta "The attributes of a file have been modified."
+.It Sy PN_CLOSE Ta "A file descriptor was closed by the remote end."
+.It Sy PN_CREATE Ta "A file was created in a watched directory."
+.It Sy PN_DELETE Ta "The file was deleted."
+.It Sy PN_ERROR Ta "An error occurred in the kernel event queue."
+.It Sy PN_MODIFY Ta "The contents of a file have been modified."
+.It Sy PN_READ Ta "Data can be read from a file descriptor without blocking."
+.It Sy PN_SIGNAL Ta "A signal was delivered to the process."
+.It Sy PN_TIMEOUT Ta "A user-defined time interval has elapsed."
+.It Sy PN_WRITE Ta "Data can be written to a file descriptor without blocking."
+.El
+.Pp
+When creating a new watch, the following flags may also be used:
+.Bl -column "Flag" "Meaning" -offset indent
+.It Sy PN_ONESHOT Ta "Delete the watch after an event occurs."
+.El
+.Sh WATCHES
+A watch defines specific events that an application wishes to be notified about. There
+is a function for each different type of event that can be monitored.
+All of the functions for creating watches take a `mask' parameter, which is a bitmask
+of events to watch for. They also take a callback function that will be invoked
+when the event occurs.
+The functions that create watches are as follows:
+.Pp
+.Fn pnotify_trap_signal
+causes an event to be generated when a signal is received by the process. The signal
+is otherwise blocked, and will not cause a signal handler to be run. 
+.Pp
+.Fn pnotify_watch_vnode
+causes an event to be generated when a file or directory is changed. 
+.Pp
+.Fn pnotify_watch_fd
+causes an event to be generated when an open file descriptor is ready for reading,
+ready for writing, or closed by the remote end.
+.Pp
+.Fn pnotify_set_timer
+causes an event to be generated at a regular interval.
+.Pp
+.Fn pnotify_add_event
+is a low-level function that adds a watch to the list of active watches. The only reason
+to use this function is to add an event to a different context than the current thread.
+.Pp
+When a watch is created, a unique watch descriptor is returned. To delete the watch,
+call 
+.Fn pnotify_rm_watch
+and pass the watch descriptor as an argument.
+.Sh ACTIONS
+Programs need to respond to events. When a watch is created, a callback function
+can be provided. This callback function will be executed each time a matching
+event occurs. It is also possible to process each event manually and construct
+your own event loop.
+.Pp
+.Fn pnotify_get_event
+waits for a single event to occur, and fills the pnotify_event structure with information
+about the event.  If an error occurs in the underlying kernel event queue, an
+event is returned with the PN_ERROR flag set.
+.Pp
+The pnotify_event structure contains the following fields:
 .Bd -literal
 struct pnotify_event {
         int       wd;
@@ -21,57 +101,23 @@ struct pnotify_event {
         char      name[NAME_MAX + 1];
 };
 .Ed
-
-.Sh DESCRIPTION
-The
-.Nm
-library provides a portable way to monitor filesystem events. It closely resembles
-the inotify(7) kernel subsystem in Linux, but is implemented as a userspace library
-to support other kernel mechanisms such as kqueue(4).
 .Pp
-.Fn pnotify_init
-initializes the event queue, and must be called before any of the other pnotify functions.
-.Pp
-.Fn pnotify_add_watch
-adds a watch for a given file or directory. The mask parameter is composed of one
-or more bitflags from the following list of events:
-.Bl -column "Flag" "Meaning" -offset indent
-.It Sy PN_ACCESS Ta "The access time (atime) has been modified."
-.It Sy PN_CREATE Ta "A file was created in the directory."
-.It Sy PN_DELETE Ta "The file was deleted."
-.It Sy PN_MODIFY Ta "The modification time (mtime) has been modified."
-.El
-.Pp
-When calling
-.Fn pnotify_add_watch
-the following flags may also be used:
-.Bl -column "Flag" "Meaning" -offset indent
-.It Sy PN_ALL_EVENTS Ta "Monitor all events."
-.It Sy PN_ONESHOT Ta "Delete the watch after an event occurs."
-.El
-
-.Fn pnotify_rm_watch
-removes a watch from the watchlist.
-
-.Fn pnotify_get_event
-blocks until an event occurs, and fills the pnotify_event structure with information
-about the event.  If an error occurs in the underlying kernel event queue, an
-event is returned with the PN_ERROR flag set.
-
+.Fn pnotify_dispatch
+waits for events and invokes the apropriate callback when an event occurs. 
+This function never returns, and is intended to serve as the applications main event loop.
 .Sh RETURN VALUES
 .Fn pnotify_add_watch
 returns a positive integer that represents a unique watch descriptor, or -1 if an error occurs.
 .Pp
 All other functions return zero if successful, or -1 if an error occurs.
 .Sh EXAMPLES
-
 The following example creates a watch on the /tmp directory and prints the 
 names of files that are created or deleted within the directory.
 .Bd -literal
 struct pnotify_event evt;
 
 pnotify_init();
-pnotify_add_watch("/tmp", PN_ALL_EVENTS);
+pnotify_add_watch("/tmp", PN_ALL_EVENTS, NULL, NULL);
 while (pnotify_get_event(&evt) == 0) {
 	if (evt.mask & PN_CREATE) 
 		printf("file created: %s", evt.name);
@@ -83,20 +129,42 @@ while (pnotify_get_event(&evt) == 0) {
 	}
 }
 .Ed
+.Pp
+The next example shows how to use the
+.Fn pnotify_dispatch
+function. If the SIGHUP signal is sent to the process, it prints out a message. After
+five seconds, the program will terminate.
+.Bd -literal
+void got_signal(int signum)
+{
+	printf("got signal %d\\n", signum);
+}
 
+void got_timeout()
+{
+	printf("timed out\\n");
+	exit(0);
+}
+
+int main(int argc, char **argv)
+{
+	pnotify_init();
+	pnotify_trap_signal(SIGHUP, got_signal, NULL);
+	pnotify_set_timer(5, PN_ONESHOT, got_timeout, NULL);
+	pnotify_dispatch();
+}
+.Ed
 .Sh THREADSAFETY
-To use
 .Nm
-in a threaded program, link with `libpnotify_r` instead of `libpnotify`. 
-All of the function calls are the same. Each thread has it's own 
-event queue, so you must call
+is a multi-threaded library and is fully threadsafe. Each thread must call
 .Fn pnotify_init
-as part of each thread's initialization routine.
-
+before calling any other library functions. It is possible for one thread 
+to add a watch to another thread by setting the `ctx' context variable
+before calling
+.Fn pnotify_add_event
 .Sh SEE ALSO
 .Xr kqueue 4
 .Xr inotify 7
-
 .\" .Sh STANDARDS
 .Sh HISTORY
 pnotify was first released on July 25th, 2007 with support for inotify and kqueue.
@@ -104,4 +172,3 @@ pnotify was first released on July 25th, 2007 with support for inotify and kqueu
 Mark Heily <devel@heily.com>
 .\" .Sh CAVEATS
 .\" .Sh BUGS
-.\"kqueue(4) support is buggy and only works properly with PN_CREATE events.

@@ -25,7 +25,8 @@ EXTRA_DIST=		index.html Doxyfile
 libpnotify_la_SOURCES=	pnotify.c signal.c timer.c \
                         bsd.c linux.c
 libpnotify_la_CFLAGS=	-O2 -g -Wall -D_REENTRANT
-libpnotify_la_LDFLAGS=  -lpthread -lrt
+libpnotify_la_LDFLAGS=  -lpthread
+# fixme-  linux requires -lrt
 
 #
 # Unit testing program
