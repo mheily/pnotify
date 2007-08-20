@@ -263,13 +263,10 @@ bsd_dump_inotify_event(struct inotify_event *iev)
 
 #endif /* TODO */
 
-
 int
-bsd_add_watch(struct pn_watch *watch)
+bsd_add_vnode_watch(struct pn_watch *watch)
 {
 	struct stat     st;
-	struct kevent *kev = &watch->kev;
-	int mask = watch->mask;
 
 	/* Open the file */
 	if ((watch->fd = open(watch->path, O_RDONLY)) < 0) {
@@ -287,22 +284,34 @@ bsd_add_watch(struct pn_watch *watch)
 	/* Initialize the directory structure, if needed */
 	if (watch->is_dir) 
 		directory_open(watch);
+	return 0;
+}
+
+int
+bsd_add_watch(struct pn_watch *watch)
+{
+	struct kevent *kev = &watch->kev;
+	int mask = watch->mask;
+	int i = 0;
 
 	/* Create and populate a kevent structure */
-	EV_SET(kev, watch->fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, 0, 0, watch);
-	if (mask & PN_ONESHOT)
-		kev->flags |= EV_ONESHOT;
 	switch (watch->type) {
+
+		case WATCH_SIGNAL:
+			return 0;
 
 		case WATCH_FD:
 			if (mask & PN_READ)
-				kev->filter = EVFILT_READ;
+				i = EVFILT_READ;
 			if (mask & PN_WRITE)
-				kev->filter = EVFILT_WRITE;
+				i = EVFILT_WRITE;
+			EV_SET(kev, watch->ident.fd, i, EV_ADD | EV_CLEAR, 0, 0, watch);
 			break;
 
 		case WATCH_VNODE:
-			kev->filter = EVFILT_VNODE;
+			if (bsd_add_vnode_watch(watch) < 0)
+				return -1;
+			EV_SET(kev, watch->fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, 0, 0, watch);
 			if (mask & PN_ATTRIB)
 				kev->fflags |= NOTE_ATTRIB;
 			if (mask & PN_CREATE)
@@ -311,9 +320,15 @@ bsd_add_watch(struct pn_watch *watch)
 				kev->fflags |= NOTE_DELETE | NOTE_WRITE;
 			if (mask & PN_MODIFY)
 				kev->fflags |= NOTE_WRITE;
+			break;
+
 		default:
 			break;
 	}
+
+	/* Set the 'oneshot' flag */
+	if (mask & PN_ONESHOT)
+		kev->flags |= EV_ONESHOT;
 
 	/* Add the kevent to the kernel event queue */
 	if (kevent(KQUEUE_FD, kev, 1, NULL, 0, NULL) < 0) {
