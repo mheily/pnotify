@@ -77,7 +77,7 @@ test_timer()
 	int wd;
 
 	printf("timer tests\n");
-	test ((wd = pnotify_set_timer(1, PN_DEFAULT, NULL, NULL)));
+	test ((wd = pnotify_set_timer(1, PN_ONESHOT, NULL, NULL)));
 	test (pnotify_get_event(&evt, ctx));
 	printf("timer tests complete\n");
 }
@@ -95,26 +95,11 @@ test_dispatch()
 	test (pnotify_dispatch());
 }
 
-int
-main(int argc, char **argv)
+static void
+test_vnode()
 {
-	struct pnotify_event    evt;
 	int wd;
-
-	/* Create a test directory */
-	(void) system("rm -rf .check");
-	if (system("mkdir .check") < 0)
-		err(1, "mkdir failed");
-	if (system("mkdir .check/dir") < 0)
-		err(1, "mkdir failed");
-
-	/* Initialize the queue */
-	test(ctx = pnotify_init());
-
-	test_signals();
-	test_fd();
-	test_timer();
-	/* Disabled: test_dispatch(); */
+	struct pnotify_event    evt;
 
 	/* Watch for events in the test directory */
 	test((wd = pnotify_watch_vnode(".check", PN_CREATE | PN_DELETE | PN_MODIFY, NULL, NULL))); 
@@ -153,48 +138,28 @@ main(int argc, char **argv)
 
 	/* Remove the watch */
 	test (pnotify_rm_watch(wd));
+}
+
+
+int
+main(int argc, char **argv)
+{
+	/* Create a test directory */
+	(void) system("rm -rf .check");
+	if (system("mkdir .check") < 0)
+		err(1, "mkdir failed");
+	if (system("mkdir .check/dir") < 0)
+		err(1, "mkdir failed");
+
+	/* Initialize the queue */
+	test(ctx = pnotify_init());
+
+	//test_fd();
+	test_timer();
+	test_signals();
+	test_vnode();
+	/* Disabled: test_dispatch(); */
 		
-#if DEADWOOD
-	if ((fd = inotify_init()) < 0) 
-		err(1, "%s", "inotify_init()");
-
-	if ((wd = inotify_add_watch(fd, ".check", IN_ALL_EVENTS)) <= 0) 
-		err(1, "%s - %d", "inotify_add_watch()", wd);
-
-	if ((wd = inotify_rm_watch(fd, wd)) < 0) 
-		err(1, "%s", "inotify_rm_watch()");
-
-	if ((wd = inotify_rm_watch(fd, 666)) == 0) 
-		err(1, "%s", "inotify_rm_watch() - false positive");
-
-	/* Add it back so we can monitor events */
-	if ((wd = inotify_add_watch(fd, ".check", IN_ALL_EVENTS)) <= 0) 
-		err(1, "%s - %d", "inotify_add_watch()", wd);
-
-	printf("touching foo\n");
-	if (system("touch .check/foo") < 0)
-		err(1, "touch failed");
-	get_event(fd, &evt, &name, sizeof(name));
-
-#if TODO
-	if ((wd = inotify_add_watch(fd, ".check/foo", IN_ALL_EVENTS)) <= 0) 
-		err(1, "%s - %d", "inotify_add_watch()", wd);
-
-	printf("touching bar\n");
-	if (system("touch .check/bar") < 0)
-		err(1, "touch failed");
-
-	printf("unlinking foo\n");
-	if (system("rm .check/foo") < 0)
-		err(1, "rm failed");
-
-	printf("unlinking bar\n");
-	if (system("rm .check/bar") < 0)
-		err(1, "rm failed");
-
-#endif
-#endif
-
 	printf("all tests passed.\n");
 	exit(EXIT_SUCCESS);
 }

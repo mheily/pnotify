@@ -48,8 +48,8 @@
  */
 static pthread_key_t CTX_KEY;
 
-#define CTX_GET()	((struct pnotify_ctx *) pthread_getspecific(CTX_KEY))
-#define CTX_SET(ctx)	(pthread_setspecific(CTX_KEY, ctx))
+#define CTX_GET()      ((struct pnotify_ctx *) pthread_getspecific(CTX_KEY))
+#define CTX_SET(ctx)   (pthread_setspecific(CTX_KEY, ctx))
 
 
 /* Define the system-specific vtable.  */
@@ -148,10 +148,7 @@ pnotify_init()
 	TAILQ_INIT(&ctx->event);
 
 	/* Set the global per-thread context variable */
-	if (pthread_setspecific(CTX_KEY, ctx) != 0) {
-		warn("pthread_setspecific(3) failed");
-		return NULL;
-	}
+	CTX_SET(ctx);
 
 	/* Push the cleanup routine on the stack */
 	//FIXME: macro error: pthread_cleanup_push(pnotify_free, ctx);
@@ -169,7 +166,7 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	size_t len;
 
 	/* Get the context */
-	if (!watch->ctx)
+	//FIXME-TESTING: if (!watch->ctx)
 		watch->ctx = CTX_GET();
 
 	/* Allocate a new entry */
@@ -224,11 +221,13 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	_watch->ctx = watch->ctx;
 
 	/* Register the watch with the kernel */
-	if (sys->add_watch(_watch) < 0) {
-		warn("adding watch failed");
-		//TODO: free(watch->ident.path);
-		free(_watch);
-		return -1;
+	if (!((watch->type & WATCH_TIMER) || (watch->type & WATCH_SIGNAL))) {
+		if (sys->add_watch(_watch) < 0) {
+			warn("adding watch failed");
+			//TODO: free(watch->ident.path);
+			free(_watch);
+			return -1;
+		}
 	}
 
 	/* Add the watch to the watchlist */
@@ -236,8 +235,7 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	LIST_INSERT_HEAD(&WATCH, _watch, entries);
 	pthread_mutex_unlock(&WATCH_MUTEX);
 
-	dprintf("added watch: wd=%d mask=%d path=%s\n", 
-		watch->wd, watch->mask, watch->path);
+	dprintf("added watch: wd=%d mask=%d\n", _watch->wd, _watch->mask);
 
 	return _watch->wd;
 }
@@ -277,6 +275,7 @@ pnotify_rm_watch(int wd)
 		warn("watch # %d not found", wd);
 		return -1;
 	} else {
+		dprintf("watch %d removed\n", wd);
 		return 0;
 	}
 }
@@ -401,6 +400,7 @@ pnotify_watch_vnode(const char *path, int mask, void (*cb)(), void *arg)
 {
 	struct pnotify_watch w;
 
+	memset(&w, 0, sizeof(w));
 	w.type = WATCH_VNODE;
 	w.ident.path = (char *) path;
 	w.mask = mask;
@@ -416,6 +416,7 @@ pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg)
 {
 	struct pnotify_watch w;
 
+	memset(&w, 0, sizeof(w));
 	w.type = WATCH_FD;
 	w.ident.fd = fd;
 	w.mask = mask;
@@ -432,6 +433,7 @@ pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg)
 	int wd;
 
 	/* Add the watch */
+	memset(&w, 0, sizeof(w));
 	w.type = WATCH_TIMER;
 	w.ident.interval = interval;
 	w.mask = mask;
@@ -460,6 +462,7 @@ pnotify_trap_signal(int signum, void (*cb)(), void *arg)
 	if (pn_trap_signal(CTX_GET(), signum) != 0)
 		return -1;
 
+	memset(&w, 0, sizeof(w));
 	w.type = WATCH_SIGNAL;
 	w.ident.signum = signum;
 	w.mask = PN_SIGNAL;
@@ -509,6 +512,8 @@ pnotify_dispatch()
 void
 pn_event_add(struct pnotify_ctx *ctx, struct pnotify_event *evt)
 {
+	dprintf("adding an event to the eventlist..\n");
+
 	/* Assign the event to a context */
 	mutex_lock(ctx);
 	TAILQ_INSERT_HEAD(&ctx->event, evt, entries);
