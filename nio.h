@@ -71,7 +71,7 @@ enum nio_op {
 /** A nonblocking I/O operation control block */
 struct niocb {
 
-	/* The 'request' data fields filled in by the parent process */
+	/* The 'request' data fields filled in by the caller */
 
 	enum nio_op req_op;		/**< The requested system call */
 	int         req_fd;		/**< An open file descriptor */
@@ -81,7 +81,7 @@ struct niocb {
 	char       *req_path;		/**< The path for open(2) */
 	int         req_flags;		/**< Bitmask flags for open(2) */      
 
-	/* The 'response' data fields filled in by the child process */
+	/* The 'response' data fields filled in after the syscall completes */
 
 	union {
 		struct stat    st;	/**< File statistics from stat(2) */
@@ -96,18 +96,6 @@ struct niocb {
 	int         res_shmid;		/**< The id of the shared memory segment */
 };
 
-
-/**
- * Initialize the NIO subsystem.
- *
- * @return 0 if successful, or -1 if an error occurred
- */
-int nio_library_init();
-
-/* NIO configuration options */
-
-/* TODO: int nio_get_options(struct niorc *rc); */
-/* TODO: int nio_set_options(const struct niorc *rc); */
 
 /* Replacement for POSIX I/O system calls */
 
@@ -169,6 +157,4 @@ int nio_getnameinfo(struct niocb *cb,
 		size_t servlen,
 		int flags);
 
-	NIO_GETADDRINFO,
-	NIO_GETNAMEINFO,
 #endif
