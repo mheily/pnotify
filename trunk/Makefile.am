@@ -47,11 +47,13 @@ doc:
 	groff -Tps -mandoc pnotify.3 > manpage.ps
 	ps2pdf manpage.ps manpage.pdf
 	lynx -dump index.html > README
+	doxygen
 
 # The 'sync' target rebuilds the webpage and uploads it to the public server
 
-sync:		doc
-	scp index.html manpage.html manpage.ps manpage.pdf heily.com:~/public_html/pnotify
+sync:	
+	scp -r index.html manpage.html manpage.ps manpage.pdf doxygen/ \
+	  heily.com:~/public_html/pnotify
 
 # Ensure that the documentation is regenerated when building a source tarball
 dist-hook:	doc

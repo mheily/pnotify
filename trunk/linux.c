@@ -16,16 +16,15 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
-/** @file
- *
- *  Linux-specific code.
- *
- */
-
 #include "config.h"
 #include "pnotify.h"
 #include "pnotify-internal.h"
 
+/** @file
+ *
+ *  Linux-specific functions.
+ *
+*/
 
 #if HAVE_INOTIFY
 
