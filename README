@@ -83,24 +83,29 @@ Download
 
 Documentation
 
-     * The pnotify(3) manpage in [8]HTML or [9]PostScript format.
+     * The pnotify(3) manpage in the following formats:
+          + [8]HTML
+          + [9]PostScript
+          + [10]PDF
+     * Future development will include support for non-blocking I/O
+       syscalls. To see what this will look like, check out [11]nio.h
      * Doxygen-generated API reference manual (coming soon)
 
 Mailing List
 
    There is a mailing list for discussion about the pnotify library.
-   Click [10]here to sign up, post a question or comment, or browse
+   Click [12]here to sign up, post a question or comment, or browse
    through the archives.
 
 Contact the Author
 
-   For more information, contact Mark Heily at [11]devel@heily.com
+   For more information, contact Mark Heily at [13]devel@heily.com
 
 Related Links
 
-     * [12]FAM - the original, unmaintained monitoring utility from SGI.
-     * [13]gamin - the modern FAM replacement. Part of the GNOME project.
-     * [14]libevent - a library for building event-driven servers.
+     * [14]FAM - the original, unmaintained monitoring utility from SGI.
+     * [15]gamin - the modern FAM replacement. Part of the GNOME project.
+     * [16]libevent - a library for building event-driven servers.
        Supports socket events, but not filesystem events.
      _________________________________________________________________
 
@@ -117,8 +122,10 @@ References
    7. http://pnotify.googlecode.com/svn/trunk/
    8. file://localhost/home/mark/pnotify/manpage.html
    9. file://localhost/home/mark/pnotify/manpage.ps
-  10. http://groups.google.com/group/pnotify/topics
-  11. mailto:devel@heily.com
-  12. http://oss.sgi.com/projects/fam/
-  13. http://www.gnome.org/~veillard/gamin/
-  14. http://monkey.org/~provos/libevent/
+  10. file://localhost/home/mark/pnotify/manpage.pdf
+  11. http://pnotify.googlecode.com/svn/trunk/nio.h
+  12. http://groups.google.com/group/pnotify/topics
+  13. mailto:devel@heily.com
+  14. http://oss.sgi.com/projects/fam/
+  15. http://www.gnome.org/~veillard/gamin/
+  16. http://monkey.org/~provos/libevent/

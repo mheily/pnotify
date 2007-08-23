@@ -48,17 +48,17 @@ or more bitflags from the following list of events:
 .It Sy PN_WRITE Ta "Data can be written to a file descriptor without blocking."
 .El
 .Pp
-When creating a new watch, the following flags may also be used:
+When creating a new watch, the following flag may also be used:
 .Bl -column "Flag" "Meaning" -offset indent
 .It Sy PN_ONESHOT Ta "Delete the watch after an event occurs."
 .El
 .Sh WATCHES
-A watch defines specific events that an application wishes to be notified about. There
-is a function for each different type of event that can be monitored.
+A watch is a set of events that an application wishes to be notified about.
+There is a function for each different type of event that can be monitored.
 All of the functions for creating watches take a `mask' parameter, which is a bitmask
-of events to watch for. They also take a callback function that will be invoked
-when the event occurs.
-The functions that create watches are as follows:
+of events to watch for. 
+They also take a callback function that will be invoked when the event occurs.
+The following functions are used to create watches:
 .Pp
 .Fn pnotify_trap_signal
 causes an event to be generated when a signal is received by the process. The signal
@@ -117,7 +117,7 @@ names of files that are created or deleted within the directory.
 struct pnotify_event evt;
 
 pnotify_init();
-pnotify_add_watch("/tmp", PN_ALL_EVENTS, NULL, NULL);
+pnotify_watch_vnode("/tmp", PN_CREATE | PN_DELETE, NULL, NULL);
 while (pnotify_get_event(&evt) == 0) {
 	if (evt.mask & PN_CREATE) 
 		printf("file created: %s", evt.name);
@@ -152,6 +152,7 @@ int main(int argc, char **argv)
 	pnotify_trap_signal(SIGHUP, got_signal, NULL);
 	pnotify_set_timer(5, PN_ONESHOT, got_timeout, NULL);
 	pnotify_dispatch();
+	/* NOTREACHED */
 }
 .Ed
 .Sh THREADSAFETY
