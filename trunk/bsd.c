@@ -36,121 +36,156 @@
 static int kq_directory_event_handler(struct kevent kev, struct pn_watch * watch);
 static int directory_open(struct pn_watch * watch);
 static int directory_scan(struct pn_watch * watch);
+void bsd_dump_kevent(struct kevent kev);
 
 /** The file descriptor returned by kqueue(2) */
 static int KQUEUE_FD = -1;
 
-void *
-bsd_kqueue_loop(void * unused)
+static void
+bsd_handle_fd_event(struct pn_watch *watch)
 {
-	const int nkev = 100;
-	struct pn_watch *watch;
-	struct kevent _kev[nkev];
-	struct kevent *kev;
+	struct kevent *kev = &watch->kev;
 	struct pnotify_event *evt;
-	int i, rc;
 
-	/* Avoid a compiler warning */
-	watch = unused;
+	/* Construct a pnotify_event structure */
+	if ((evt = calloc(1, sizeof(*evt))) == NULL) 
+		err(1, "malloc failed");
+
+	/* Set the mask */
+	if (kev->filter & EVFILT_READ)
+		evt->mask |= PN_READ;
+	if (kev->filter & EVFILT_WRITE)
+		evt->mask |= PN_WRITE;
+	if (kev->flags & EV_EOF)
+		evt->mask |= PN_CLOSE;
+
+	/* Add the event to the list of pending events */
+	pn_event_add(watch->ctx, evt);
+
+	dprint_event(evt);
+}
+
+
+static void
+bsd_handle_vnode_event(struct pn_watch *watch)
+{
+	struct kevent *kev = &watch->kev;
+	struct pnotify_event *evt;
+
+	/* Workaround:
+
+	   Deleting a file in a watched directory causes two events:
+	   NOTE_MODIFY on the directory
+	   NOTE_DELETE on the file
+
+	   We ignore the NOTE_DELETE on the file.
+	 */
+	if (watch->parent_wd && kev->fflags & NOTE_DELETE) {
+		dprintf("ignoring NOTE_DELETE on a watched file\n");
+		return;
+	}
+
+	/* Convert the kqueue(4) flags to pnotify_event flags */
+	if (!watch->is_dir) {
+
+		/* Construct a pnotify_event structure */
+		if ((evt = calloc(1, sizeof(*evt))) == NULL) 
+			err(1, "malloc failed");
+
+		if (kev->fflags & NOTE_WRITE)
+			evt->mask |= PN_MODIFY;
+		if (kev->fflags & NOTE_TRUNCATE)
+			evt->mask |= PN_MODIFY;
+		if (kev->flags & NOTE_EXTEND)
+			evt->mask |= PN_MODIFY;
+		if (kev->fflags & NOTE_ATTRIB)
+			evt->mask |= PN_ATTRIB;
+		if (kev->fflags & NOTE_DELETE)
+			evt->mask |= PN_DELETE;
+
+		/* If the event happened within a watched directory,
+		   add the filename and the parent watch descriptor.
+		 */
+		if (watch->parent_wd) {
+
+			/* KLUDGE: remove the leading basename */
+			char *fn = strrchr(watch->path, '/') ;
+			if (!fn) { 
+				fn = watch->path;
+			} else {
+				fn++;
+			}
+
+			evt->watch = watch;
+			/* FIXME: more error handling */
+			(void) strncpy(evt->name, fn, strlen(fn));
+		}
+
+		/* Add the event to the list of pending events */
+		pn_event_add(watch->ctx, evt);
+
+		dprint_event(evt);
+
+		/* Handle events on directories */
+	} else {
+
+		/* When a file is added or deleted, NOTE_WRITE is set */
+		if (kev->fflags & NOTE_WRITE) {
+			if (kq_directory_event_handler(*kev, watch) < 0) {
+				warn("error processing diretory");
+				return;
+			}
+		}
+		/* FIXME: Handle the deletion of a watched directory */
+		else if (kev->fflags & NOTE_DELETE) {
+			warn("unimplemented - TODO");
+			return;
+		} else {
+			warn("unknown event recieved");
+			return;
+		}
+
+	}
+}
+
+
+void *
+bsd_kqueue_loop()
+{
+	struct pn_watch *watch;
+	struct kevent kev;
+	int rc;
 
 	/* Create a kqueue descriptor */
 	if ((KQUEUE_FD = kqueue()) < 0)
 		err(1, "kqueue(2)");
 
 	/* Loop forever waiting for events */
-LOOP:
+	for (;;) {
 
-	/* Wait for an event */
-	dprintf("waiting for kernel event..\n");
-	rc = kevent(KQUEUE_FD, NULL, 0, (struct kevent *) &_kev, nkev, NULL);
-	if (rc < 0) 
-		err(1, "kevent(2) failed");
+		/* Wait for an event */
+		dprintf("waiting for kernel event..\n");
+		rc = kevent(KQUEUE_FD, NULL, 0, &kev, 1, NULL);
+		if (rc < 0) 
+			err(1, "kevent(2) failed");
 
-	/* Process each event */
-	for (i = 0; i < rc; i++) {
-
-		kev = &_kev[i];
+		bsd_dump_kevent(kev);
 
 		/* Find the matching watch structure */
-		watch = (struct pn_watch *) kev->udata;
+		watch = (struct pn_watch *) kev.udata;
 
-		/* Workaround:
-
-		   Deleting a file in a watched directory causes two events:
-		   NOTE_MODIFY on the directory
-		   NOTE_DELETE on the file
-
-		   We ignore the NOTE_DELETE on the file.
-		   */
-		if (watch->parent_wd && kev->fflags & NOTE_DELETE) {
-			dprintf("ignoring NOTE_DELETE on a watched file\n");
-			continue;
-		}
-
-		/* Convert the kqueue(4) flags to pnotify_event flags */
-		if (!watch->is_dir) {
-
-			/* Construct a pnotify_event structure */
-			if ((evt = calloc(1, sizeof(*evt))) == NULL) 
-				err(1, "malloc failed");
-
-			if (kev->fflags & NOTE_WRITE)
-				evt->mask |= PN_MODIFY;
-			if (kev->fflags & NOTE_TRUNCATE)
-				evt->mask |= PN_MODIFY;
-			if (kev->flags & NOTE_EXTEND)
-				evt->mask |= PN_MODIFY;
-			if (kev->fflags & NOTE_ATTRIB)
-				evt->mask |= PN_ATTRIB;
-			if (kev->fflags & NOTE_DELETE)
-				evt->mask |= PN_DELETE;
-
-			/* If the event happened within a watched directory,
-			   add the filename and the parent watch descriptor.
-			   */
-			if (watch->parent_wd) {
-
-				/* KLUDGE: remove the leading basename */
-				char *fn = strrchr(watch->path, '/') ;
-				if (!fn) { 
-					fn = watch->path;
-				} else {
-					fn++;
-				}
-
-				evt->watch = watch;
-				/* FIXME: more error handling */
-				(void) strncpy(evt->name, fn, strlen(fn));
-			}
-
-			/* Add the event to the list of pending events */
-			pn_event_add(watch->ctx, evt);
-
-			dprint_event(evt);
-
-			/* Handle events on directories */
-		} else {
-
-			/* When a file is added or deleted, NOTE_WRITE is set */
-			if (kev->fflags & NOTE_WRITE) {
-				if (kq_directory_event_handler(*kev, watch) < 0) {
-					warn("error processing diretory");
-					return NULL;
-				}
-			}
-			/* FIXME: Handle the deletion of a watched directory */
-			else if (kev->fflags & NOTE_DELETE) {
-				warn("unimplemented - TODO");
-				return NULL;
-			} else {
-				warn("unknown event recieved");
-				return NULL;
-			}
-
+		/* Handle the event */
+		switch (watch->type) {
+			case WATCH_FD:
+				bsd_handle_fd_event(watch);
+				break;
+			case WATCH_VNODE:
+				bsd_handle_vnode_event(watch);
+				break;
+			default:
+				errx(1, "invalid watch type %d", watch->type);
 		}
 	}
-
-	goto LOOP;
 
 	close(KQUEUE_FD);
 	return NULL;
@@ -177,91 +212,39 @@ bsd_cleanup(void)
 }
 
 
-#if DEAD
-	// example from linux
-
-int
-bsd_add_watch(struct pnotify_ctx *ctx, struct pn_watch *watch)
-{
-	struct epoll_event *ev = &watch->epoll_evt;
-	int mask = watch->mask;
-	uint32_t        imask = 0;
-
-	switch (watch->type) {
-
-		case WATCH_FD:
-			/* Generate the epoll_event structure */
-			ev->events = EPOLLET;
-			if (mask & PN_READ)
-				ev->events |= EPOLLIN;
-			if (mask & PN_WRITE)
-				ev->events |= EPOLLOUT;
-			ev->data.ptr = watch;
-
-			/* Add the epoll_event structure to the kernel queue */
-			if (epoll_ctl(EPOLL_FD, EPOLL_CTL_ADD, watch->ident.fd, ev) < 0) {
-				warn("epoll_ctl(2) failed");
-				return -1;
-			}
-			break;
-
-		case WATCH_VNODE:
-			/* Generate the mask */
-			if (mask & PN_ATTRIB)
-				imask |= IN_ATTRIB;
-			if (mask & PN_CREATE)
-				imask |= IN_CREATE;
-			if (mask & PN_DELETE)
-				imask |= IN_DELETE | IN_DELETE_SELF;
-			if (mask & PN_MODIFY)
-				imask |= IN_MODIFY;
-			if (mask & PN_ONESHOT)
-				imask |= IN_ONESHOT;
-
-			/* Add the event to the kernel event queue */
-			watch->wd = inotify_add_watch(INOTIFY_FD, watch->ident.path, imask);
-			if (watch->wd < 0) {
-				perror("inotify_add_watch(2) failed");
-				return -1;
-			}
-			break;
-
-		default:
-			/* The default action is to do nothing. */
-			break;
-	}
-
-	return 0;
-}
-
 void
-bsd_dump_inotify_event(struct inotify_event *iev)
+bsd_dump_kevent(struct kevent kev)
 {
 	static const char *nam[] = {
-		"IN_ACCESS", "IN_MODIFY", "IN_ATTRIB", "IN_CLOSE_WRITE",
-		"IN_CLOSE_NOWRITE", "IN_OPEN", "IN_MOVED_FROM",
-		"IN_MOVED_TO", "IN_CREATE", "IN_DELETE", "IN_DELETE_SELF",
-		"IN_MOVE_SELF", "IN_UNMOUNT", "IN_Q_OVERFLOW", "IN_IGNORED",
-		"IN_ONLYDIR", "IN_DONT_FOLLOW", "IN_MASK_ADD", "IN_ISDIR",
-		"IN_ONESHOT", NULL };
+		"EV_ADD", "EV_ENABLE", "EV_DISABLE", "EV_DELETE", "EV_ONESHOT",
+		"EV_CLEAR", "EV_EOF", "EV_ERROR",
+		"EVFILT_READ", "EVFILT_WRITE", "EVFILT_AIO", "EVFILT_VNODE",
+		"EVFILT_PROC", "EVFILT_SIGNAL", "EVFILT_TIMER", "EVFILT_NETDEV",
+		NULL
+		};
 	static const int val[] = {
-		IN_ACCESS, IN_MODIFY, IN_ATTRIB, IN_CLOSE_WRITE,
-		IN_CLOSE_NOWRITE, IN_OPEN, IN_MOVED_FROM,
-		IN_MOVED_TO, IN_CREATE, IN_DELETE, IN_DELETE_SELF,
-		IN_MOVE_SELF, IN_UNMOUNT, IN_Q_OVERFLOW, IN_IGNORED,
-		IN_ONLYDIR, IN_DONT_FOLLOW, IN_MASK_ADD, IN_ISDIR,
-		IN_ONESHOT, 0 };
+		EV_ADD, EV_ENABLE, EV_DISABLE, EV_DELETE, EV_ONESHOT,
+		EV_CLEAR, EV_EOF, EV_ERROR,
+		EVFILT_READ, EVFILT_WRITE, EVFILT_AIO, EVFILT_VNODE,
+		EVFILT_PROC, EVFILT_SIGNAL, EVFILT_TIMER, EVFILT_NETDEV,
+		0
+		};
 	int i;
 
-	fprintf(stderr, "inotify event: wd=%d mask=", iev->wd);
+	fprintf(stderr, "kevent: ident=%d filter=", kev.ident);
 	for (i = 0; val[i] != 0; i++) {
-		if (iev->mask & val[i])
+		if (kev.filter & val[i])
 			fprintf(stderr, "%s ", nam[i]);
 	}
+	fprintf(stderr, "flags=");
+	for (i = 0; val[i] != 0; i++) {
+		if (kev.flags & val[i])
+			fprintf(stderr, "%s ", nam[i]);
+	}
+	fprintf(stderr, "udata=%p", kev.udata);
 	fprintf(stderr, "\n");
 }
 
-#endif /* TODO */
 
 int
 bsd_add_vnode_watch(struct pn_watch *watch)
@@ -329,6 +312,9 @@ bsd_add_watch(struct pn_watch *watch)
 	/* Set the 'oneshot' flag */
 	if (mask & PN_ONESHOT)
 		kev->flags |= EV_ONESHOT;
+
+	// FIXME - Testing
+	kev->udata = watch;
 
 	/* Add the kevent to the kernel event queue */
 	if (kevent(KQUEUE_FD, kev, 1, NULL, 0, NULL) < 0) {
@@ -558,7 +544,7 @@ kq_directory_event_handler(struct kevent kev, struct pn_watch * watch)
 		evt->watch = watch;
 		evt->mask = dptr->mask;
 		(void) strlcpy(evt->name, dptr->ent.d_name, sizeof(evt->name));
-		dprint_event(ev);
+		dprint_event(evt);
 
 		/* Add the event to the list of pending events */
 		pn_event_add(watch->ctx, evt);
