@@ -36,7 +36,7 @@
 static int kq_directory_event_handler(struct kevent kev, struct pn_watch * watch);
 static int directory_open(struct pn_watch * watch);
 static int directory_scan(struct pn_watch * watch);
-void bsd_dump_kevent(struct kevent kev);
+void bsd_dump_kevent(struct kevent *kev);
 
 /** The file descriptor returned by kqueue(2) */
 static int KQUEUE_FD = -1;
@@ -109,9 +109,9 @@ bsd_handle_vnode_event(struct pn_watch *watch)
 		if (watch->parent_wd) {
 
 			/* KLUDGE: remove the leading basename */
-			char *fn = strrchr(watch->path, '/') ;
+			char *fn = strrchr(watch->ident.path, '/') ;
 			if (!fn) { 
-				fn = watch->path;
+				fn = watch->ident.path;
 			} else {
 				fn++;
 			}
@@ -156,10 +156,6 @@ bsd_kqueue_loop()
 	struct kevent kev;
 	int rc;
 
-	/* Create a kqueue descriptor */
-	if ((KQUEUE_FD = kqueue()) < 0)
-		err(1, "kqueue(2)");
-
 	/* Loop forever waiting for events */
 	for (;;) {
 
@@ -167,9 +163,9 @@ bsd_kqueue_loop()
 		dprintf("waiting for kernel event..\n");
 		rc = kevent(KQUEUE_FD, NULL, 0, &kev, 1, NULL);
 		if (rc < 0) 
-			err(1, "kevent(2) failed");
+			err(1, "kqueue_loop: kevent(2) failed");
 
-		bsd_dump_kevent(kev);
+		bsd_dump_kevent(&kev);
 
 		/* Find the matching watch structure */
 		watch = (struct pn_watch *) kev.udata;
@@ -197,6 +193,10 @@ bsd_init_once(void)
 {
 	pthread_t tid;
 
+	/* Create a kqueue descriptor */
+	if ((KQUEUE_FD = kqueue()) < 0)
+		err(1, "kqueue(2)");
+
         /* Create a dedicated kqueue thread */
 	if (pthread_create( &tid, NULL, bsd_kqueue_loop, NULL ) != 0)
 		errx(1, "pthread_create(3) failed");
@@ -213,7 +213,7 @@ bsd_cleanup(void)
 
 
 void
-bsd_dump_kevent(struct kevent kev)
+bsd_dump_kevent(struct kevent *kev)
 {
 	static const char *nam[] = {
 		"EV_ADD", "EV_ENABLE", "EV_DISABLE", "EV_DELETE", "EV_ONESHOT",
@@ -231,17 +231,19 @@ bsd_dump_kevent(struct kevent kev)
 		};
 	int i;
 
-	fprintf(stderr, "kevent: ident=%d filter=", kev.ident);
+	fprintf(stderr, "kevent: ident=%d filter=", kev->ident);
 	for (i = 0; val[i] != 0; i++) {
-		if (kev.filter & val[i])
+		if (kev->filter & val[i])
 			fprintf(stderr, "%s ", nam[i]);
 	}
+#if FIXME
 	fprintf(stderr, "flags=");
 	for (i = 0; val[i] != 0; i++) {
-		if (kev.flags & val[i])
+		if (kev->flags & val[i])
 			fprintf(stderr, "%s ", nam[i]);
 	}
-	fprintf(stderr, "udata=%p", kev.udata);
+#endif
+	fprintf(stderr, "udata=%p", kev->udata);
 	fprintf(stderr, "\n");
 }
 
@@ -252,8 +254,8 @@ bsd_add_vnode_watch(struct pn_watch *watch)
 	struct stat     st;
 
 	/* Open the file */
-	if ((watch->fd = open(watch->path, O_RDONLY)) < 0) {
-		warn("opening path `%s' failed", watch->path);
+	if ((watch->fd = open(watch->ident.path, O_RDONLY)) < 0) {
+		warn("opening path `%s' failed", watch->ident.path);
 		return -1;
 	}
 
@@ -275,13 +277,10 @@ bsd_add_watch(struct pn_watch *watch)
 {
 	struct kevent *kev = &watch->kev;
 	int mask = watch->mask;
-	int i = 0;
+	int i = -1;
 
 	/* Create and populate a kevent structure */
 	switch (watch->type) {
-
-		case WATCH_SIGNAL:
-			return 0;
 
 		case WATCH_FD:
 			if (mask & PN_READ)
@@ -313,8 +312,7 @@ bsd_add_watch(struct pn_watch *watch)
 	if (mask & PN_ONESHOT)
 		kev->flags |= EV_ONESHOT;
 
-	// FIXME - Testing
-	kev->udata = watch;
+	bsd_dump_kevent(kev);
 
 	/* Add the kevent to the kernel event queue */
 	if (kevent(KQUEUE_FD, kev, 1, NULL, 0, NULL) < 0) {
@@ -361,19 +359,19 @@ directory_open(struct pn_watch * watch)
 
 	/* Initialize the li_directory structure */
 	LIST_INIT(&dir->all);
-	if ((dir->dirp = opendir(watch->path)) == NULL) {
+	if ((dir->dirp = opendir(watch->ident.path)) == NULL) {
 		perror("opendir(2)");
 		return -1;
 	}
 
 	/* Store the pathname */
-	dir->path_len = strlen(watch->path);
+	dir->path_len = strlen(watch->ident.path);
 	if ((dir->path_len >= PATH_MAX) || 
 		((dir->path = malloc(dir->path_len + 1)) == NULL)) {
 			perror("malloc(3)");
 			return -1;
 	}
-	strncpy(dir->path, watch->path, dir->path_len);
+	strncpy(dir->path, watch->ident.path, dir->path_len);
 		
 	/* Scan the directory */
 	if (directory_scan(watch) < 0) {
