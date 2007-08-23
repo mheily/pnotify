@@ -62,6 +62,8 @@ timer_enable()
 
 	if (setitimer(ITIMER_REAL, &itv, NULL) != 0) 
 		err(1, "setitimer(2)");
+
+	dprintf("timers enabled..\n");
 }
 
 
@@ -75,6 +77,8 @@ timer_disable()
 
 	if (setitimer(ITIMER_REAL, &itv, NULL) != 0) 
 		err(1, "setitimer(2)");
+
+	dprintf("timers disabled..\n");
 }
 
 
@@ -137,11 +141,12 @@ pn_timer_init(void)
 	LIST_INIT(&TIMER);
 }
 
+
 void *
 pn_timer_loop(void * unused)
 {
 	struct pnotify_event *evt;
-	struct pn_timer *timer;
+	struct pn_timer *timer, *tmp;
 	sigset_t signal_set;
 	int signum;
 
@@ -155,10 +160,11 @@ pn_timer_loop(void * unused)
 		sigemptyset(&signal_set);
 		sigaddset(&signal_set, SIGALRM);
 		sigwait(&signal_set, &signum);
+		dprintf("got SIGALRM..\n");
 		
 		/* Reduce the time remaining on all timers */
 		pthread_mutex_lock(&TIMER_MUTEX);
-		LIST_FOREACH(timer, &TIMER, entries) {
+		LIST_FOREACH_SAFE(timer, &TIMER, entries, tmp) {
 
 			/* If the timer has expired, generate an event ... */
 			if (TIMER_INTERVAL > timer->remaining) {
@@ -174,6 +180,21 @@ pn_timer_loop(void * unused)
 
 				/* Reset the timer to it's initial value */
 				timer->remaining = timer->watch->ident.interval;
+
+				/* Remove the timer if ONESHOT is requested */
+				if (timer->watch->mask & PN_ONESHOT) {
+
+					/* Delete the watch*/
+					(void) pnotify_rm_watch(timer->watch->wd);
+
+					/* Delete the timer entry */
+					LIST_REMOVE(timer, entries);
+					free(timer);
+
+					/* Disable the periodic timer if there are no more timers */
+					if (LIST_EMPTY(&TIMER)) 
+						timer_disable();
+				}
 			}
 
 			/* Otherwise, decrease the timer value */
