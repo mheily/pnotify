@@ -170,7 +170,7 @@ struct pn_watch {
 	struct kevent    kev;
 
 	/* The pathname of the directory (only for directories) */
-	char path[PATH_MAX + 1];
+	//DEADWOOD: use ident.path instead of: char path[PATH_MAX + 1];
 
 #elif __linux__
 

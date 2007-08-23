@@ -109,7 +109,7 @@ test_vnode()
 
 	/* Read the event */
 	test (pnotify_get_event(&evt, ctx)); 
-	if (!event_cmp(&evt, 1, PN_CREATE, "foo")) 
+	if (!event_cmp(&evt, wd, PN_CREATE, "foo")) 
 		err(1, "unexpected event value");
 
 	/* Create a new file #2 */
@@ -117,7 +117,7 @@ test_vnode()
 
 	/* Read the event */
 	test (pnotify_get_event(&evt, ctx));
-	if (!event_cmp(&evt, 1, PN_CREATE, "bar")) 
+	if (!event_cmp(&evt, wd, PN_CREATE, "bar")) 
 		err(1, "unexpected event value");
 
 	/* Delete the new file */
@@ -125,7 +125,7 @@ test_vnode()
 
 	/* Read the delete event */
 	test (pnotify_get_event(&evt, ctx));
-	if (!event_cmp(&evt, 1, PN_DELETE, "foo")) 
+	if (!event_cmp(&evt, wd, PN_DELETE, "foo")) 
 		err(1, "unexpected event value");
 
 	/* Modify file #2 */
@@ -133,7 +133,7 @@ test_vnode()
 
 	/* Read the modify event */
 	test (pnotify_get_event(&evt, ctx));
-	if (!event_cmp(&evt, 1, PN_MODIFY, "bar")) 
+	if (!event_cmp(&evt, wd, PN_MODIFY, "bar")) 
 		err(1, "unexpected event value");
 
 	/* Remove the watch */
@@ -154,10 +154,10 @@ main(int argc, char **argv)
 	/* Initialize the queue */
 	test(ctx = pnotify_init());
 
-	//test_fd();
-	test_timer();
 	test_signals();
+	test_fd();
 	test_vnode();
+	test_timer();
 	/* Disabled: test_dispatch(); */
 		
 	printf("all tests passed.\n");

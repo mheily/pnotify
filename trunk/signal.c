@@ -106,6 +106,7 @@ pn_signal_loop(void * unused)
 		/* Wait for a signal */
 		sigfillset(&signal_set);
 		sigdelset(&signal_set, SIGALRM);
+		dprintf("sigwait..\n");
 		sigwait(&signal_set, &signum);
 
 		/* Get the delivery context, or ignore the signal */
