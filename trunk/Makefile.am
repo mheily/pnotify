@@ -20,7 +20,7 @@ lib_LTLIBRARIES=	libpnotify.la
 include_HEADERS=	pnotify.h
 noinst_HEADERS=		queue.h pnotify-internal.h thread.h
 dist_man3_MANS=		pnotify.3
-EXTRA_DIST=		index.html Doxyfile
+EXTRA_DIST=		index.html Doxyfile nio.h
 
 libpnotify_la_SOURCES=	pnotify.c signal.c timer.c \
                         bsd.c linux.c
@@ -45,12 +45,13 @@ preview-man:
 doc:
 	groff -Thtml -mandoc pnotify.3 > manpage.html
 	groff -Tps -mandoc pnotify.3 > manpage.ps
+	ps2pdf manpage.ps manpage.pdf
 	lynx -dump index.html > README
 
 # The 'sync' target rebuilds the webpage and uploads it to the public server
 
 sync:		doc
-	scp index.html manpage.html manpage.ps $$WWWHOST:~/public_html/pnotify
+	scp index.html manpage.html manpage.ps manpage.pdf heily.com:~/public_html/pnotify
 
 # Ensure that the documentation is regenerated when building a source tarball
 dist-hook:	doc

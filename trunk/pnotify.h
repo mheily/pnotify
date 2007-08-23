@@ -266,11 +266,43 @@ int pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg);
 #if TODO
 	// experimental
 	
+/** The maximum number of arguments that can be passed to an async function */
+#define PNOTIFY_ARG_MAX 12
+
+struct pnotify_func {
+
+	/** The address of the function entry point */
+	void (*symbol)();
+
+	/** The number of arguments to pass to the function */
+	size_t argc;
+
+	/** An argument vector */
+	void *argv[PNOTIFY_ARG_MAX + 1];
+
+	/** The callback function to invoke when the original function completes */
+	void (*cb)();
+	/** FIXME - argument to the callback (this is not sufficient) */
+	void *cbarg;	
+
+	/* -- filled in by the function when it returns -- */
+
+	/** The return value of the function */
+	union {
+		int rv_int;
+		void *rv_ptr;
+	} retval;
+
+	/** The value of the global 'errno' immediately after the function call */
+	int ret_errno;
+};
+
+#define pnotify_set_function(pf, sym, 
 /** Invoke a function asynchronously and generate an event when it returns.
  *
  * @param mask either PN_DEFAULT or PN_ONESHOT
  */
-int pnotify_call_function(int (*func)(), size_t nargs, ...);
+int pnotify_call_function(struct );
 #endif
 
 #endif /* _PNOTIFY_H */
