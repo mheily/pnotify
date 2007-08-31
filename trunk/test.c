@@ -45,7 +45,7 @@ test_signals()
 	struct pnotify_event    evt;
 
 	printf("signal tests\n");
-	test (pnotify_trap_signal(SIGUSR1, NULL, NULL));
+	test (pnotify_trap_signal(SIGUSR1, NULL));
 	test (kill(getpid(), SIGUSR1));
 	test (pnotify_get_event(&evt, ctx));
 	if (!event_cmp(&evt, SIGUSR1, PN_SIGNAL, NULL)) 
@@ -61,7 +61,7 @@ test_fd()
 
 	printf("fd tests\n");
 	test (pipe(fildes));
-	test ((wd = pnotify_watch_fd(fildes[0], PN_READ, NULL, NULL)));
+	test ((wd = pnotify_watch_fd(fildes[0], PN_READ, NULL)));
 	if (write(fildes[1], "a", 1) != 1)
 		err(1, "write(2)");
 	test (pnotify_get_event(&evt, ctx));
@@ -77,7 +77,7 @@ test_timer()
 	int wd;
 
 	printf("timer tests\n");
-	test ((wd = pnotify_set_timer(1, PN_ONESHOT, NULL, NULL)));
+	test ((wd = pnotify_set_timer(1, PN_ONESHOT, NULL)));
 	test (pnotify_get_event(&evt, ctx));
 	printf("timer tests complete\n");
 }
@@ -85,13 +85,14 @@ test_timer()
 static void 
 test_callback(int signum)
 {
-	printf("signum %d\n");
+	printf("all tests passed.\n");
+	exit(EXIT_SUCCESS);
 }
 
 static void
 test_dispatch()
 {
-	test (pnotify_set_timer(1, PN_DEFAULT, test_callback, NULL));
+	test (pnotify_set_timer(1, PN_DEFAULT, CB_ENCODE(test_callback, 0)));
 	test (pnotify_dispatch());
 }
 
@@ -102,7 +103,7 @@ test_vnode()
 	struct pnotify_event    evt;
 
 	/* Watch for events in the test directory */
-	test((wd = pnotify_watch_vnode(".check", PN_CREATE | PN_DELETE | PN_MODIFY, NULL, NULL))); 
+	test((wd = pnotify_watch_vnode(".check", PN_CREATE | PN_DELETE | PN_MODIFY, NULL))); 
 
 	/* Create a new file */
 	test (system("touch .check/foo"));
@@ -140,6 +141,39 @@ test_vnode()
 	test (pnotify_rm_watch(wd));
 }
 
+void
+pn_func_dump2(struct pn_callback *f)
+{
+	(void) fprintf(stderr,
+		"function dump: sym=%p argc=%d argv0=%p argt0=%d\n",
+		f->symbol, f->argc, f->argv[0], f->argt[0]
+	 	);
+}
+
+int test_cb(int x, long y, char *z)
+{
+	if (strcmp(z, "hello") != 0)
+		errx(1, "invalid arg");
+	if (x != y)
+		errx(1, "invalid arg1");
+	return 0;
+}
+
+void
+test_function()
+{
+	struct pn_callback fn;
+	struct pn_callback *test;
+	struct pnotify_event    evt;
+	int wd;
+
+	test = CB_ENCODE(test_cb, 3, 1, 1, "hello");
+	//pn_func_dump2(test);
+	test ((wd = pnotify_call_function(test, NULL)));
+	test (pnotify_get_event(&evt, ctx));
+	if (!event_cmp(&evt, wd, PN_RETURN, NULL)) 
+		err(1, "unexpected event value");
+}
 
 int
 main(int argc, char **argv)
@@ -154,12 +188,10 @@ main(int argc, char **argv)
 	/* Initialize the queue */
 	test(ctx = pnotify_init());
 
-	test_signals();
 	test_fd();
-	test_vnode();
+	test_function();
+	test_signals();
+	//test_vnode();
 	test_timer();
-	/* Disabled: test_dispatch(); */
-		
-	printf("all tests passed.\n");
-	exit(EXIT_SUCCESS);
+	test_dispatch(); 
 }

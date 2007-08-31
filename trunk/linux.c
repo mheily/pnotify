@@ -43,17 +43,10 @@ void *
 linux_inotify_loop(void * unused)
 {
 	struct pn_watch *watch;
-	struct pnotify_event *evt;
 	struct inotify_event *iev, *endp;
 	ssize_t         bytes;
 	char            buf[4096];
-
-	/* Avoid a compiler warning */
-	watch = unused;
-
-	/* Create an inotify descriptor */
-	if ((INOTIFY_FD = inotify_init()) < 0)
-		err(1, "inotify_init(2)");
+	int             mask;
 
 	/* Loop forever waiting for events */
 	for (;;) {
@@ -63,8 +56,11 @@ linux_inotify_loop(void * unused)
 		 * This may block, so release the mutex.
 		 */
 		bytes = read(INOTIFY_FD, &buf, sizeof(buf));
-		if (bytes <= 0) 
+		if (bytes <= 0) {
+			if (errno == EINTR)
+				continue;
 			err(1, "read(2)");
+		}
 
 		/* Compute the beginning and end of the event list */
 		iev = (struct inotify_event *) & buf;
@@ -91,27 +87,23 @@ linux_inotify_loop(void * unused)
 				continue;
 			}
 
-			/* Construct a pnotify_event structure */
-			if ((evt = calloc(1, sizeof(*evt))) == NULL) 
-				err(1, "malloc failed");
-
-			evt->watch = watch;
-			(void) strncpy(evt->name, iev->name, iev->len);
+			mask = 0;
+			/* Compute the event bitmask */
 			if (iev->mask & IN_ATTRIB)
-				evt->mask |= PN_ATTRIB;
+				mask |= PN_ATTRIB;
 			if (iev->mask & IN_MODIFY)
-				evt->mask |= PN_MODIFY;
+				mask |= PN_MODIFY;
 			if (iev->mask & IN_CREATE)
-				evt->mask |= PN_CREATE;
+				mask |= PN_CREATE;
 			if (iev->mask & IN_DELETE)
-				evt->mask |= PN_DELETE;
+				mask |= PN_DELETE;
 			if (iev->mask & IN_DELETE_SELF) {
-				evt->mask |= PN_DELETE;
-				(void) strncpy(evt->name, "", 0);
+				mask |= PN_DELETE;
+				// XXX - FIXME - (void) strncpy(evt->name, "", 0);
 			}
 
 			/* Add the event to the list of pending events */
-			pn_event_add(watch->ctx, evt);
+			pn_event_add(watch, mask, iev->name);
 
 next_event:
 			/* Go to the next event */
@@ -128,17 +120,9 @@ void *
 linux_epoll_loop(void * unused)
 {
 	static const int maxevents = 100;
-	struct pnotify_event *evt;
 	struct pn_watch *watch;
 	struct epoll_event events[maxevents];
-	int i, numevents;
-
-	/* Avoid a compiler warning */
-	watch = unused;
-
-	/* Create an epoll descriptor */
-	if ((EPOLL_FD = epoll_create(1000)) < 0)
-		err(1, "epoll_create(2)");
+	int i, mask, numevents;
 
 	/* Loop forever waiting for events */
 	for (;;) {
@@ -168,22 +152,18 @@ linux_epoll_loop(void * unused)
 			}
 #endif
 
-			/* Create a new event structure */
-			if ((evt = calloc(1, sizeof(*evt))) == NULL)
-				err(1, "calloc(3)");
-			evt->watch = watch;
-			evt->mask = 0;
+			mask = 0;
 			if (events[i].events & EPOLLIN)
-				evt->mask |= PN_READ;
+				mask |= PN_READ;
 			if (events[i].events & EPOLLOUT)
-				evt->mask |= PN_WRITE;
+				mask |= PN_WRITE;
 			if (events[i].events & EPOLLHUP)
-				evt->mask |= PN_CLOSE;
+				mask |= PN_CLOSE;
 			if (events[i].events & EPOLLERR)
-				evt->mask |= PN_ERROR;
+				mask |= PN_ERROR;
 
 			/* Add the event to an event queue */
-			pn_event_add(watch->ctx, evt);
+			pn_event_add(watch, mask, NULL);
 		}
 	}
 
@@ -196,6 +176,14 @@ void
 linux_init_once(void)
 {
 	pthread_t tid;
+
+	/* Create an inotify descriptor */
+	if ((INOTIFY_FD = inotify_init()) < 0)
+		err(1, "inotify_init(2)");
+
+	/* Create an epoll descriptor */
+	if ((EPOLL_FD = epoll_create(1000)) < 0)
+		err(1, "epoll_create(2)");
 
         /* Create a dedicated epoll thread */
 	if (pthread_create( &tid, NULL, linux_epoll_loop, NULL ) != 0)
@@ -239,6 +227,7 @@ linux_add_watch(struct pn_watch *watch)
 				warn("epoll_ctl(2) failed");
 				return -1;
 			}
+			dprintf("added epoll watch for fd #%d", watch->ident.fd);
 			break;
 
 		case WATCH_VNODE:

@@ -143,15 +143,11 @@ pn_timer_init(void)
 
 
 void *
-pn_timer_loop(void * unused)
+pn_timer_loop(void *unused)
 {
-	struct pnotify_event *evt;
 	struct pn_timer *timer, *tmp;
 	sigset_t signal_set;
 	int signum;
-
-	/* Avoid a compiler warning */
-	evt = unused;
 
 	/* Loop forever waiting for an alarm signal */
 	for (;;) {
@@ -169,14 +165,8 @@ pn_timer_loop(void * unused)
 			/* If the timer has expired, generate an event ... */
 			if (TIMER_INTERVAL > timer->remaining) {
 
-				/* Create a new event structure */
-				if ((evt = calloc(1, sizeof(*evt))) == NULL)
-					err(1, "calloc(3)");
-				evt->watch = timer->watch;
-				evt->mask = PN_TIMEOUT;
-
 				/* Add the event to an event queue */
-				pn_event_add(timer->watch->ctx, evt);
+				pn_event_add(timer->watch, PN_TIMEOUT, NULL);
 
 				/* Reset the timer to it's initial value */
 				timer->remaining = timer->watch->ident.interval;
@@ -185,7 +175,7 @@ pn_timer_loop(void * unused)
 				if (timer->watch->mask & PN_ONESHOT) {
 
 					/* Delete the watch*/
-					(void) pnotify_rm_watch(timer->watch->wd);
+					pn_rm_watch(timer->watch);
 
 					/* Delete the timer entry */
 					LIST_REMOVE(timer, entries);
@@ -194,6 +184,7 @@ pn_timer_loop(void * unused)
 					/* Disable the periodic timer if there are no more timers */
 					if (LIST_EMPTY(&TIMER)) 
 						timer_disable();
+
 				}
 			}
 

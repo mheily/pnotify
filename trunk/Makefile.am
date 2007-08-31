@@ -18,15 +18,14 @@
 
 lib_LTLIBRARIES=	libpnotify.la
 include_HEADERS=	pnotify.h
-noinst_HEADERS=		queue.h pnotify-internal.h thread.h
+noinst_HEADERS=		buffer.h queue.h pnotify-internal.h thread.h
 dist_man3_MANS=		pnotify.3
 EXTRA_DIST=		index.html Doxyfile nio.h
 
-libpnotify_la_SOURCES=	pnotify.c signal.c timer.c \
+libpnotify_la_SOURCES=	pnotify.c signal.c timer.c function.c buffer.c \
                         bsd.c linux.c
-libpnotify_la_CFLAGS=	-O2 -g -Wall -D_REENTRANT
+libpnotify_la_CFLAGS=	-O2 -g -Wall -D_REENTRANT -DPNOTIFY_DEBUG=1 
 libpnotify_la_LDFLAGS=  -lpthread
-# fixme-  linux requires -lrt
 
 #
 # Unit testing program
@@ -35,7 +34,7 @@ TESTS=			test
 check_PROGRAMS=		test
 test_SOURCES=		test.c
 test_LDADD=		.libs/libpnotify.a -lpthread
-test_CFLAGS=		-DPNOTIFY_DEBUG=1 -D_REENTRANT
+test_CFLAGS=		-D_REENTRANT
 
 # Preview the manpage in the current terminal window
 preview-man:

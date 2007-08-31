@@ -89,23 +89,24 @@ Documentation
           + [10]PDF
      * Future development will include support for non-blocking I/O
        syscalls. To see what this will look like, check out [11]nio.h
-     * Doxygen-generated API reference manual (coming soon)
+     * Doxygen-generated [12]annotated data structures and function
+       reference.
 
 Mailing List
 
    There is a mailing list for discussion about the pnotify library.
-   Click [12]here to sign up, post a question or comment, or browse
+   Click [13]here to sign up, post a question or comment, or browse
    through the archives.
 
 Contact the Author
 
-   For more information, contact Mark Heily at [13]devel@heily.com
+   For more information, contact Mark Heily at [14]devel@heily.com
 
 Related Links
 
-     * [14]FAM - the original, unmaintained monitoring utility from SGI.
-     * [15]gamin - the modern FAM replacement. Part of the GNOME project.
-     * [16]libevent - a library for building event-driven servers.
+     * [15]FAM - the original, unmaintained monitoring utility from SGI.
+     * [16]gamin - the modern FAM replacement. Part of the GNOME project.
+     * [17]libevent - a library for building event-driven servers.
        Supports socket events, but not filesystem events.
      _________________________________________________________________
 
@@ -124,8 +125,9 @@ References
    9. file://localhost/home/mark/pnotify/manpage.ps
   10. file://localhost/home/mark/pnotify/manpage.pdf
   11. http://pnotify.googlecode.com/svn/trunk/nio.h
-  12. http://groups.google.com/group/pnotify/topics
-  13. mailto:devel@heily.com
-  14. http://oss.sgi.com/projects/fam/
-  15. http://www.gnome.org/~veillard/gamin/
-  16. http://monkey.org/~provos/libevent/
+  12. file://localhost/home/mark/pnotify/doxygen/html/files.html
+  13. http://groups.google.com/group/pnotify/topics
+  14. mailto:devel@heily.com
+  15. http://oss.sgi.com/projects/fam/
+  16. http://www.gnome.org/~veillard/gamin/
+  17. http://monkey.org/~provos/libevent/

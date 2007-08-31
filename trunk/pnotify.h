@@ -38,9 +38,125 @@
 #endif
 
 /* Opaque structures */
+struct pnotify_buffer;
 struct pnotify_event;
 struct pnotify_ctx;
 
+/** The maximum number of arguments that can be passed to an async function */
+#define PNOTIFY_ARG_MAX 8
+
+/** An element in an argument vector */
+union pnotify_arg {
+	int    arg_int;
+	long   arg_long;
+};
+
+/** A function to be invoked asynchronously */
+struct pn_callback {
+
+	/** The address of the function entry point */
+	int (*symbol)();
+
+	/** The number of arguments to pass to the function */
+	size_t argc;
+
+	/** An argument vector */
+	union pnotify_arg argv[PNOTIFY_ARG_MAX + 1];
+
+	/** The size of each argument in <argv> */
+	enum {
+		/** Four bytes */
+		PN_TYPE_INT,
+
+		/** Four bytes on x86, or eight bytes on amd64 */
+		PN_TYPE_LONG,
+
+	} argt[PNOTIFY_ARG_MAX + 1];
+
+	/* -- filled in by the function when it returns -- */
+
+	/** The return value of the function */
+	int retval;
+
+	/** The value of the global 'errno' immediately after the function call */
+	int saved_errno;
+};
+
+
+/**
+ * Encode a function call.
+ *
+ * Given the address of a function, and zero or more arguments, this macro 
+ * constructs a constant anonymous pn_callback structure and returns a 
+ * pointer to the newly created structure.
+ *
+ * Limitations:
+ *   * Type checking is NOT performed
+ *   * Cannot be used to call macros
+ *   * Cannot be used with variadic functions
+ *   * Arguments must be 32-bit or 64-bit integers, or pointers
+ *   * Functions must have an int return value
+ *   * No more than PN_ARG_MAX arguments can be passed to the function
+ *
+ * @param sym function address
+ * @param argc argument count
+ * @param ... one or more parameters
+ * @return a pointer to a constant pn_callback structure containing all
+ * the information needed to call the function at a later date.
+ */
+#define CB_ENCODE(sym,argc,...) _CB_SET##argc(sym,__VA_ARGS__)
+
+#define _ARG_SET(n,v) .argv[n] = (sizeof(v) == sizeof(long)) ? (long) v : (int) v, \
+                      .argt[n] = (sizeof(v) == sizeof(long)) ? PN_TYPE_LONG : PN_TYPE_INT,
+
+#define _CB_SET0(sym,unused)                                                  \
+          &((struct pn_callback) { .symbol = sym, .argc = 0 })
+
+#define _CB_SET1(sym,x0)                                                      \
+          &((struct pn_callback) { .symbol = sym, .argc = 1,                  \
+             _ARG_SET(0, x0)})
+
+#define _CB_SET2(sym,x0,x1)                                                   \
+          &((struct pn_callback) { .symbol = sym, .argc = 2,                  \
+             _ARG_SET(0, x0) _ARG_SET(1, x1)})
+
+#define _CB_SET3(sym,x0,x1,x2)                                                \
+          &((struct pn_callback) { .symbol = sym, .argc = 3,                  \
+             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2)})
+
+#define _CB_SET4(sym,x0,x1,x2,x3)                                             \
+          &((struct pn_callback) { .symbol = sym, .argc = 4,                  \
+             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)})
+
+#define _CB_SET5(sym,x0,x1,x2,x3,x4)                                          \
+          &((struct pn_callback) { .symbol = sym, .argc = 5,                  \
+             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
+             _ARG_SET(4, x4)})
+
+#define _CB_SET6(sym,x0,x1,x2,x3,x4,x5)                                       \
+          &((struct pn_callback) { .symbol = sym, .argc = 6,                  \
+             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
+             _ARG_SET(4, x4) _ARG_SET(5, x5)})
+
+#define _CB_SET7(sym,x0,x1,x2,x3,x4,x5,x6)                                    \
+          &((struct pn_callback) { .symbol = sym, .argc = 7,                  \
+             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
+             _ARG_SET(4, x4) _ARG_SET(5, x5) _ARG_SET(6, x6)})
+
+#define _CB_SET8(sym,x0,x1,x2,x3,x4,x5,x6,x7)                                 \
+          &((struct pn_callback) { .symbol = sym, .argc = 8,                  \
+             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
+             _ARG_SET(4, x4) _ARG_SET(5, x5) _ARG_SET(6, x6) _ARG_SET(7, x7)})
+
+/** Decode an encoded function call and invoke the function */
+#define CB_INVOKE(rv,f) do {                                                  \
+   switch (f->argc) {                                                         \
+      case 0: rv = f->symbol(); \
+      default: errx(1, "invalid function encoding");                          \
+   }} while (0)
+
+/** Invoke a function asynchronously and generate an event when it returns. */
+int pnotify_call_function(struct pn_callback *fn, struct pn_callback *cb);
 
 /** The type of resource to be watched */
 enum pn_watch_type {
@@ -90,6 +206,11 @@ union pn_resource_id {
 	 * various events are generated.
 	 */
 	char *path;
+
+	/**
+	 * An asynchronous function call
+	 */
+	struct pn_callback *func;
 };
 
 
@@ -126,6 +247,9 @@ enum pn_event_bitmask {
 	/** A signal was received */
 	PN_SIGNAL               = 0x1 << 8,  
 
+	/** An asynchronous function call has completed */
+	PN_RETURN               = 0x1 << 9,
+
 	/** Delete the watch after a matching event occurs */
 	PN_ONESHOT		= 0x1 << 30,
 
@@ -133,7 +257,6 @@ enum pn_event_bitmask {
 	PN_ERROR		= 0x1 << 31,
 
 };
-
 
 /**
  * A watch request.
@@ -151,15 +274,8 @@ struct pnotify_watch {
 	/** The resource ID */
 	union pn_resource_id ident;
 
-	/** A callback to be invoked when a matching event occurs
-	 *
-	 * Parameters passed to the function are:
-	 *     - the resource identifier from the watch structure
-	 *     - the mask of events which occurred
-	 *     - an opaque pointer to `arg' 
-	 */
-	void (*cb)();
-	void *arg;
+	/** A callback to be invoked when a matching event occurs */
+	struct pn_callback *cb;
 
 	/** The context that receives the event */
 	struct pnotify_ctx *ctx;
@@ -239,7 +355,7 @@ void pnotify_free(struct pnotify_ctx *ctx);
  * @param signum the signal to be trapped
  * @return a watch descriptor, or -1 if an error occurred
  */ 
-int pnotify_trap_signal(int signum, void (*cb)(), void *arg);
+int pnotify_trap_signal(int signum, struct pn_callback *cb);
 
 /** Watch for changes to a vnode 
  *
@@ -247,10 +363,10 @@ int pnotify_trap_signal(int signum, void (*cb)(), void *arg);
  * @param mask a bitmask of events to monitor
  * @return a watch descriptor, or -1 if an error occurred
  */ 
-int pnotify_watch_vnode(const char *path, int mask, void (*cb)(), void *arg);
+int pnotify_watch_vnode(const char *path, int mask, struct pn_callback *cb);
 
 /** Watch for changes to a file descriptor */
-int pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg); 
+int pnotify_watch_fd(int fd, int mask, struct pn_callback *cb); 
 
 /** Set a timer to fire after specific number of seconds 
  *
@@ -261,48 +377,6 @@ int pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg);
  * @param interval the number of seconds between timer events
  * @param mask either PN_DEFAULT or PN_ONESHOT
  */
-int pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg);
-
-#if TODO
-	// experimental
-	
-/** The maximum number of arguments that can be passed to an async function */
-#define PNOTIFY_ARG_MAX 12
-
-struct pnotify_func {
-
-	/** The address of the function entry point */
-	void (*symbol)();
-
-	/** The number of arguments to pass to the function */
-	size_t argc;
-
-	/** An argument vector */
-	void *argv[PNOTIFY_ARG_MAX + 1];
-
-	/** The callback function to invoke when the original function completes */
-	void (*cb)();
-	/** FIXME - argument to the callback (this is not sufficient) */
-	void *cbarg;	
-
-	/* -- filled in by the function when it returns -- */
-
-	/** The return value of the function */
-	union {
-		int rv_int;
-		void *rv_ptr;
-	} retval;
-
-	/** The value of the global 'errno' immediately after the function call */
-	int ret_errno;
-};
-
-#define pnotify_set_function(pf, sym, 
-/** Invoke a function asynchronously and generate an event when it returns.
- *
- * @param mask either PN_DEFAULT or PN_ONESHOT
- */
-int pnotify_call_function(struct );
-#endif
+int pnotify_set_timer(int interval, int mask, struct pn_callback *cb);
 
 #endif /* _PNOTIFY_H */

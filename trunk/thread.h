@@ -68,8 +68,7 @@
 /* pthread_once is emulated for single-threaded code */
 #define pthread_once_t           int
 #define PTHREAD_ONCE_INIT        0
-#define pthread_once(var,func)   (*var = 1)
-#define FIXME_pthread_once(var,func)	do { 				\
+#define pthread_once(var,func)	do { 				\
 	  if (!*var)   							\
 	       { func(); *var = 1; }					\
         } while (0)
@@ -78,9 +77,11 @@
  * pthread_cleanup_push() is not emulated since all resources are freed
  * when a process exits. This means that cleanup handlers should *only*
  * be used to deallocate memory.
+ * 
+ * @todo this should probably be emulated 
  */
-#define FIXME pthread_cleanup_push(x,y) pthread_noop
+#define pthread_cleanup_push(x,y) pthread_noop
 
-#endif /* _REENTRANT */
+#endif /* ! _REENTRANT */
 
 #endif /* _THREAD_H_ */

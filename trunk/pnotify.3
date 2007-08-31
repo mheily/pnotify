@@ -18,8 +18,10 @@
 .Fd int pnotify_watch_vnode(char *path, int mask, void (*cb)(), void *arg);
 .Fd int pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg); 
 .Fd int pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg);
+.Fd int pnotify_call_function(struct pn_callback *fn, void (*cb)(), void *arg);
 .Fd void pnotify_free();
 .Pp
+.Fd struct pn_callback * FUNC_ENCODE(function-addr, argc, argv[0] .. argv[n]);
 .Sh DESCRIPTION
 The
 .Nm
@@ -43,6 +45,7 @@ or more bitflags from the following list of events:
 .It Sy PN_ERROR Ta "An error occurred in the kernel event queue."
 .It Sy PN_MODIFY Ta "The contents of a file have been modified."
 .It Sy PN_READ Ta "Data can be read from a file descriptor without blocking."
+.It Sy PN_RETURN Ta "An asynchronous function call has completed."
 .It Sy PN_SIGNAL Ta "A signal was delivered to the process."
 .It Sy PN_TIMEOUT Ta "A user-defined time interval has elapsed."
 .It Sy PN_WRITE Ta "Data can be written to a file descriptor without blocking."
@@ -73,6 +76,10 @@ ready for writing, or closed by the remote end.
 .Pp
 .Fn pnotify_set_timer
 causes an event to be generated at a regular interval.
+.Pp
+.Fn pnotify_call_function
+performs an asynchronous function call that generates a PN_RETURN event
+when the function returns. [TODO - document struct pn_callback]
 .Pp
 .Fn pnotify_add_event
 is a low-level function that adds a watch to the list of active watches. The only reason
@@ -105,6 +112,18 @@ struct pnotify_event {
 .Fn pnotify_dispatch
 waits for events and invokes the apropriate callback when an event occurs. 
 This function never returns, and is intended to serve as the applications main event loop.
+.Sh ASYNCHRONOUS FUNCTION CALLS
+To achieve a high level of concurrency in an event-driven server, it is important that the program never block while waiting for an I/O operation to complete. 
+.Nm
+offers a way to invoke a function call asynchronously, and continue processing without waiting for the the function to complete. When the function call returns, a PN_RETURN event is generated
+that contains the result of the function call.
+.Pp
+The
+.Fn FUNC_ENCODE
+macro encodes a function call into a form that 
+.Nm
+uses to perform an asynchronous function call. This macro takes the address of the function,
+the number of arguments, and zero or more arguments. 
 .Sh RETURN VALUES
 .Fn pnotify_add_watch
 returns a positive integer that represents a unique watch descriptor, or -1 if an error occurs.
