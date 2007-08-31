@@ -99,11 +99,22 @@ struct niocb {
 
 /* Replacement for POSIX I/O system calls */
 
-int nio_open(struct niocb *cb, const char *path, int flags, mode_t mode);
-int nio_close(struct niocb *cb, int fd);
-int nio_read(struct niocb *cb, int fd, size_t count);
-int nio_write(struct niocb *cb, int fd, const void *buf, size_t count);
-int nio_lseek(struct niocb *cb, int fd, off_t offset, int whence);
+/** Wrapper for open(2) */
+static inline int 
+nio_open(const char *path, int flags, mode_t mode, struct pn_callback *cb)
+{
+	return pnotify_call_function(CB_ENCODE(open, 3, path, flags, mode), cb);
+}
+
+/** Wrapper for read(2) */
+static inline int
+nio_read(int fd, void *buf, size_t count, struct pn_callback *cb)
+{
+	return pnotify_call_function(FUNC_ENCODE(read, 3, fd, buf, count), cb);
+}
+
+// NOT NEEDED: int nio_write(struct niocb *cb, int fd, const void *buf, size_t count);
+int nio_lseek(int fd, off_t offset, int whence, struct pn_callback *cb);
 
 /* opendir(2) related */
 

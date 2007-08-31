@@ -166,7 +166,7 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	size_t len;
 
 	/* Get the context */
-	//FIXME-TESTING: if (!watch->ctx)
+	if (!watch->ctx)
 		watch->ctx = CTX_GET();
 
 	/* Allocate a new entry */
@@ -204,6 +204,7 @@ pnotify_add_watch(struct pnotify_watch *watch)
 
 		case WATCH_SIGNAL:
 		case WATCH_TIMER:
+		case WATCH_FUNCTION:
 		case WATCH_FD:
 			_watch->ident = watch->ident;
 			break;
@@ -217,17 +218,24 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	_watch->type = watch->type;
 	_watch->mask = watch->mask;
 	_watch->cb = watch->cb;
-	_watch->arg = watch->arg;
 	_watch->ctx = watch->ctx;
 
+	/* Special case: enqueue an async function call */
+	if (watch->type == WATCH_FUNCTION &&
+		pn_call_function(_watch) != 0) {
+		
+		warn("adding watch failed");
+		//TODO: free(watch->ident.path);
+		free(_watch);
+		return -1;
+	}
+
 	/* Register the watch with the kernel */
-	if (!((watch->type & WATCH_TIMER) || (watch->type & WATCH_SIGNAL))) {
-		if (sys->add_watch(_watch) < 0) {
-			warn("adding watch failed");
-			//TODO: free(watch->ident.path);
-			free(_watch);
-			return -1;
-		}
+	if (sys->add_watch(_watch) < 0) {
+		warn("adding watch failed");
+		//TODO: free(watch->ident.path);
+		free(_watch);
+		return -1;
 	}
 
 	/* Add the watch to the watchlist */
@@ -240,6 +248,15 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	return _watch->wd;
 }
 
+
+void 
+pn_rm_watch(struct pn_watch *watch)
+{
+	pthread_mutex_lock(&WATCH_MUTEX);
+	LIST_REMOVE(watch, entries);
+	free(watch);
+	pthread_mutex_unlock(&WATCH_MUTEX);
+}
 
 int 
 pnotify_rm_watch(int wd)
@@ -254,13 +271,19 @@ pnotify_rm_watch(int wd)
 
 		/* Remove the parent watch and it's children */
 		if ((watchp->wd == wd) || (watchp->parent_wd == wd)) {
-			if (sys->rm_watch(watchp) < 0)
-				break;
+
+			/* TODO: error handling in this switch statement */
 			switch (watchp->type) {
 				case WATCH_TIMER: 
 					(void) pn_rm_timer(watchp);
 					break;
+
+				case WATCH_FUNCTION:
+					/* NOOP */
+					break;
+
 				default: 
+					(void) sys->rm_watch(watchp);
 					break;
 			}
 			LIST_REMOVE(watchp, entries);
@@ -293,7 +316,10 @@ pnotify_get_event(struct pnotify_event * evt, struct pnotify_ctx * ctx)
 		ctx = CTX_GET();
 
 	/* Wait for an event to be added to the queue */
+retry:
 	if (sem_wait(&ctx->event_count) != 0) {
+		if (errno == EINTR)
+			goto retry;
 		warn("sem_wait(3) failed");
 		return -1;
 	}
@@ -396,7 +422,7 @@ pnotify_free(struct pnotify_ctx *ctx)
 /* -------- Convenience functions for pnotify_add_watch() ----------------- */
 
 int
-pnotify_watch_vnode(const char *path, int mask, void (*cb)(), void *arg)
+pnotify_watch_vnode(const char *path, int mask, struct pn_callback *cb)
 {
 	struct pnotify_watch w;
 
@@ -405,14 +431,13 @@ pnotify_watch_vnode(const char *path, int mask, void (*cb)(), void *arg)
 	w.ident.path = (char *) path;
 	w.mask = mask;
 	w.cb = cb;
-	w.arg = arg;
 
 	return pnotify_add_watch(&w);
 }
 
 
 int
-pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg)
+pnotify_watch_fd(int fd, int mask, struct pn_callback *cb)
 {
 	struct pnotify_watch w;
 
@@ -421,13 +446,12 @@ pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg)
 	w.ident.fd = fd;
 	w.mask = mask;
 	w.cb = cb;
-	w.arg = arg;
 
 	return pnotify_add_watch(&w);
 }
 
 int
-pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg)
+pnotify_set_timer(int interval, int mask, struct pn_callback *cb)
 {
 	struct pnotify_watch w;
 	int wd;
@@ -438,7 +462,7 @@ pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg)
 	w.ident.interval = interval;
 	w.mask = mask;
 	w.cb = cb;
-	w.arg = arg;
+
 	if ((wd = pnotify_add_watch(&w)) < 0) {
 		warnx("unable to add watch for timer");
 		return -1;
@@ -454,7 +478,7 @@ pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg)
 }
 
 int
-pnotify_trap_signal(int signum, void (*cb)(), void *arg)
+pnotify_trap_signal(int signum, struct pn_callback *cb)
 {
 	struct pnotify_watch w;
 
@@ -467,24 +491,30 @@ pnotify_trap_signal(int signum, void (*cb)(), void *arg)
 	w.ident.signum = signum;
 	w.mask = PN_SIGNAL;
 	w.cb = cb;
-	w.arg = arg;
 
 	return pnotify_add_watch(&w);
 }
 
-int pnotify_call_function(int (*func)(), size_t nargs, ...)
+int
+pnotify_call_function(struct pn_callback *fn, struct pn_callback *cb)
 {
-	abort(); 
+	struct pnotify_watch w;
 
-	/* FIXME - TODO */
-	
+	memset(&w, 0, sizeof(w));
+	if ((w.ident.func = calloc(1, sizeof(fn))) == NULL)
+		return -ENOMEM;
+	memcpy(w.ident.func, fn, sizeof(*fn));
+	w.type = WATCH_FUNCTION;
+	w.cb = cb;
+
+	return pnotify_add_watch(&w);
 }
 
 int
 pnotify_dispatch()
 {
 	struct pnotify_event evt;
-	//void (*fn)(union pn_resource_id, int, void *);
+	int rv;
 
 	for (;;) {
 		/* Wait for an event */
@@ -492,17 +522,26 @@ pnotify_dispatch()
 			return -1;
 
 		/* Ignore events that have no callback defined */
-		if (!evt.watch->cb) 
+		/* FIXME - this sounds like a bad idea... maybe crash instead */
+		if (!evt.watch->cb) {
+			dprintf("ERROR: Cannot dispatch an event without a callback\n");
 			continue;
+		}
 			
+#if DEADWOOD
+	// old callback style
+	//
 		if (evt.watch->type == WATCH_VNODE) {
 			//FIXME: need to copy path to caller
 			//*(evt->watch->cb)(evt->, 
 		} else if (evt.watch->type == WATCH_TIMER) {
-			 evt.watch->cb(evt.mask, evt.watch->arg);
+			 evt.watch->cb.symbol(evt.mask, evt.watch->arg);
 		} else {
 			 evt.watch->cb(evt.watch->ident.fd, evt.mask, evt.watch->arg);
 		}
+#endif
+
+	CB_INVOKE(rv, evt.watch->cb);	
 
 	}
 	return 0;
@@ -510,16 +549,26 @@ pnotify_dispatch()
 
 
 void
-pn_event_add(struct pnotify_ctx *ctx, struct pnotify_event *evt)
+pn_event_add(struct pn_watch *watch, int mask, const char *name)
 {
+	struct pnotify_event *evt;
+
 	dprintf("adding an event to the eventlist..\n");
 
+	/* Create a new event structure */
+	if ((evt = calloc(1, sizeof(*evt))) == NULL)
+		err(1, "calloc(3)");
+	evt->watch = watch;
+	evt->mask = mask;
+	if (name)
+		strncpy(evt->name, name, sizeof(evt->name) - 1); //FIXME - Crap
+
 	/* Assign the event to a context */
-	mutex_lock(ctx);
-	TAILQ_INSERT_HEAD(&ctx->event, evt, entries);
-	mutex_unlock(ctx);
+	mutex_lock(watch->ctx);
+	TAILQ_INSERT_HEAD(&watch->ctx->event, evt, entries);
+	mutex_unlock(watch->ctx);
 
 	/* Increase the event counter, waking the thread */
-	if (sem_post(&ctx->event_count) != 0)
+	if (sem_post(&watch->ctx->event_count) != 0)
 		err(1, "sem_post(3)");
 }

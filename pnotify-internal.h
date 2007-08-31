@@ -29,6 +29,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#ifdef HAVE_SYS_PARAM_H
+# include <sys/param.h>
+#endif
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -36,15 +39,18 @@
 #include "pnotify.h"
 #include "queue.h"
 #include "thread.h"
+#include "buffer.h"
 
-/* WORKAROUND */
+/* System-specific headers */
 #if defined(__linux__)
 # define HAVE_INOTIFY 1
 # include <sys/inotify.h>
 # include <sys/epoll.h>
-#else
+#elif defined(BSD)
 # define HAVE_KQUEUE 1
 # include <sys/event.h>
+#else
+# error "This library has not been ported to your operating system"
 #endif
 
 /** An event */
@@ -138,13 +144,13 @@ struct pn_watch {
 
 	/** A callback to be invoked when a matching event occurs
 	 *
+	 * FIXME - update docs
 	 * Parameters passed to the function are:
 	 *     - the resource identifier from the watch structure
 	 *     - the mask of events which occurred
 	 *     - an opaque pointer to `arg' 
 	 */
-	void (*cb)();
-	void *arg;
+	struct pn_callback *cb;
 
 	/* ---- private fields accessible via pn_watch structure */
 
@@ -164,7 +170,7 @@ struct pn_watch {
 	 */
 	int parent_wd;
 
-#if HAVE_KQUEUE
+#if defined(BSD)
 
 	/* The associated kernel event structure */
 	struct kevent    kev;
@@ -172,7 +178,7 @@ struct pn_watch {
 	/* The pathname of the directory (only for directories) */
 	//DEADWOOD: use ident.path instead of: char path[PATH_MAX + 1];
 
-#elif __linux__
+#elif defined(__linux__)
 
 	struct epoll_event epoll_evt;
 
@@ -182,6 +188,41 @@ struct pn_watch {
 	LIST_ENTRY(pn_watch) entries;
 };
 
+
+/** An entry within a pnotify_buffer chain */
+struct pn_buffer {
+	char data[4096];
+
+	/** The position, in bytes, within the buffer.
+	 *
+	 * It is possible to do a partial read/write operation on a buffer.
+	 * The position is stored so that the next operation can continue
+	 * where the previous operation finished.
+	 */
+	size_t pos;
+};
+
+/** A linked list of buffers used to store the incoming and outgoing data 
+ *  for a file descriptor.
+ **/
+struct pnotify_buffer {
+
+	/** Input buffer */
+	STAILQ_HEAD(, pn_buffer) in;
+
+	/** Output buffer */
+	STAILQ_HEAD(, pn_buffer) out;
+
+	/** The position, in bytes, within the head of the `out' queue.
+	 *
+	 * When multiple lines are contained in a single buffer entry,
+	 * the reader's position is stored in the in_pos variable.
+	 *
+	 * An entry is freed when all its data has been written to the 
+	 * file descriptor.
+	 */
+	size_t out_pos;
+};
 
 /* The 'dprintf' macro is used for printf() debugging */
 #if PNOTIFY_DEBUG
@@ -202,12 +243,14 @@ int sys_trap_signal(struct pnotify_ctx *, int signum);
 int pn_trap_signal(struct pnotify_ctx *, int signum);
 void * pn_signal_loop(void *);
 void * pn_timer_loop(void *);
-void pn_event_add(struct pnotify_ctx *, struct pnotify_event *);
+void pn_event_add(struct pn_watch *watch, int mask, const char *name);
 struct pn_watch * pn_get_watch_by_id(int wd);
 void pn_mask_signals();
 void pn_timer_init(void);
 int pn_add_timer(struct pn_watch *watch);
 int pn_rm_timer(struct pn_watch *watch);
+void pn_rm_watch(struct pn_watch *watch);
+int pn_call_function(struct pn_watch *watch);
 
 /* vtable for system-specific functions */
 struct pnotify_vtable {

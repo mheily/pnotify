@@ -93,7 +93,6 @@ void *
 pn_signal_loop(void * unused)
 {
 	sigset_t signal_set;
-	struct pnotify_event *evt;
 	struct pnotify_ctx *ctx;
 	int signum;
 
@@ -118,14 +117,8 @@ pn_signal_loop(void * unused)
 			continue;
 		}
 
-		/* Create a new event structure */
-		if ((evt = calloc(1, sizeof(*evt))) == NULL)
-			err(1, "calloc(3)");
-		evt->watch = pn_get_watch_by_id(signum);
-		evt->mask = PN_SIGNAL;
-
 		/* Add the event to an event queue */
-		pn_event_add(ctx, evt);
+		pn_event_add(pn_get_watch_by_id(signum), PN_SIGNAL, NULL);
 	}
 
 	return NULL;
