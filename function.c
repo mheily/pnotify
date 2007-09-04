@@ -49,7 +49,7 @@ pn_func_invoke(void *arg)
 #define _arg(i) (func->argt[i] == PN_TYPE_INT ? \
 			func->argv[i].arg_int : func->argv[i].arg_long)
 
-	dprintf("running function (argc=%d)\n", func->argc);
+	dprintf("running function (argc=%zu)\n", func->argc);
 	if (func->argc == 1) 
 		rv = fp(_arg(0));
 	else if (func->argc == 2) 

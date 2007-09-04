@@ -19,7 +19,7 @@
 
 # This is for FreeBSD 6.2
 
-aclocal19 -I /usr/local/share/aclocal &&
+aclocal -I /usr/local/share/aclocal &&
 autoheader &&
 libtoolize &&
 automake &&

@@ -29,9 +29,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
-#ifdef HAVE_SYS_PARAM_H
-# include <sys/param.h>
-#endif
+#include <sys/param.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
