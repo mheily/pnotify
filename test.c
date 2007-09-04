@@ -188,10 +188,10 @@ main(int argc, char **argv)
 	/* Initialize the queue */
 	test(ctx = pnotify_init());
 
-	test_fd();
+	test_vnode();
 	test_function();
+	test_fd();
 	test_signals();
-	// FIXME: broken! test_vnode();
 	test_timer();
 	test_dispatch(); 
 }

@@ -357,7 +357,7 @@ directory_open(struct pn_watch * watch)
 	}
 
 	/* Store the pathname */
-	dir->path_len = strlen(watch->ident.path);
+	dir->path_len = strlen(watch->ident.path) + 1;
 	if ((dir->path_len >= PATH_MAX) || 
 		((dir->path = malloc(dir->path_len + 1)) == NULL)) {
 			perror("malloc(3)");
@@ -471,7 +471,7 @@ directory_scan(struct pn_watch * watch)
 
 			/* Generate the full pathname */
 			// BUG: name_max is not precise enough
-			strncpy(cp, ent.d_name, NAME_MAX);
+			strncpy(cp, ent.d_name, NAME_MAX + 1);
 
 			/* Get the file status */
 			if (stat((char *) &path, &st) < 0) {

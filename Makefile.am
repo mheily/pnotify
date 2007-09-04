@@ -24,7 +24,7 @@ EXTRA_DIST=		index.html Doxyfile nio.h
 
 libpnotify_la_SOURCES=	pnotify.c signal.c timer.c function.c buffer.c \
                         bsd.c linux.c
-libpnotify_la_CFLAGS=	-O2 -g -Wall -D_REENTRANT -DPNOTIFY_DEBUG=1 
+libpnotify_la_CFLAGS=	-O0 -g -Wall -D_REENTRANT -DPNOTIFY_DEBUG=1 
 libpnotify_la_LDFLAGS=  -lpthread
 
 #
@@ -34,7 +34,7 @@ TESTS=			test
 check_PROGRAMS=		test
 test_SOURCES=		test.c
 test_LDADD=		.libs/libpnotify.a -lpthread
-test_CFLAGS=		-D_REENTRANT
+test_CFLAGS=		-O0 -g -D_REENTRANT
 
 # Preview the manpage in the current terminal window
 preview-man:

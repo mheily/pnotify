@@ -163,7 +163,6 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	static int next_wd = 100;
 	static pthread_mutex_t next_wd_mutex = PTHREAD_MUTEX_INITIALIZER;
 	struct pn_watch *_watch;
-	size_t len;
 
 	/* Get the context */
 	if (!watch->ctx)
@@ -190,31 +189,8 @@ pnotify_add_watch(struct pnotify_watch *watch)
 		}
 	}
 
-	/* Copy the resource identifier */
-	switch (watch->type) {
-
-		case WATCH_VNODE:
-			len = strlen(watch->ident.path);
-			if (len > PATH_MAX)
-				return -1;
-			_watch->ident.path = malloc(len + 1);
-			/* TODO: malloc error handling */
-			(void) strncpy(_watch->ident.path, watch->ident.path, len);
-			break;
-
-		case WATCH_SIGNAL:
-		case WATCH_TIMER:
-		case WATCH_FUNCTION:
-		case WATCH_FD:
-			_watch->ident = watch->ident;
-			break;
-
-		default:
-			warn("invalid watch type = %d", watch->type);
-			return -1;
-	}
-
-	/* Copy the other watch fields */
+	/* Copy the watch fields */
+	_watch->ident = watch->ident;
 	_watch->type = watch->type;
 	_watch->mask = watch->mask;
 	_watch->cb = watch->cb;
@@ -252,10 +228,21 @@ pnotify_add_watch(struct pnotify_watch *watch)
 void 
 pn_rm_watch(struct pn_watch *watch)
 {
+	/* Remove the entry from the global watchlist */
 	pthread_mutex_lock(&WATCH_MUTEX);
 	LIST_REMOVE(watch, entries);
-	free(watch);
 	pthread_mutex_unlock(&WATCH_MUTEX);
+
+	/* Release memory */
+	switch (watch->type) {
+		case WATCH_VNODE: 
+		case WATCH_FUNCTION:
+			free(watch->ident.func);
+			/* NOTE: this will fall through to the next line */
+
+		default:
+			free(watch);
+	}
 }
 
 int 
@@ -425,12 +412,24 @@ int
 pnotify_watch_vnode(const char *path, int mask, struct pn_callback *cb)
 {
 	struct pnotify_watch w;
+	size_t len;
 
 	memset(&w, 0, sizeof(w));
 	w.type = WATCH_VNODE;
-	w.ident.path = (char *) path;
 	w.mask = mask;
 	w.cb = cb;
+	
+	/* Copy the `path' argument into the `ident' field. */
+	len = strlen(path) + 1;
+	if (len > PATH_MAX) {
+		warn("illegal path");
+		return -1;
+	}
+	if ((w.ident.path = malloc(len)) == NULL) {
+		warn("malloc failed");
+		return -1;
+	}
+	strncpy(w.ident.path, path, len);
 
 	return pnotify_add_watch(&w);
 }
@@ -501,11 +500,13 @@ pnotify_call_function(struct pn_callback *fn, struct pn_callback *cb)
 	struct pnotify_watch w;
 
 	memset(&w, 0, sizeof(w));
-	if ((w.ident.func = calloc(1, sizeof(fn))) == NULL)
-		return -ENOMEM;
-	memcpy(w.ident.func, fn, sizeof(*fn));
 	w.type = WATCH_FUNCTION;
 	w.cb = cb;
+
+	/* Copy the function argument */
+	if ((w.ident.func = calloc(1, sizeof(*fn))) == NULL)
+		return -ENOMEM;
+	memcpy(w.ident.func, fn, sizeof(*fn));
 
 	return pnotify_add_watch(&w);
 }
