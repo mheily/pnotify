@@ -191,7 +191,7 @@ main(int argc, char **argv)
 	test_fd();
 	test_function();
 	test_signals();
-	//test_vnode();
+	// FIXME: broken! test_vnode();
 	test_timer();
 	test_dispatch(); 
 }
