@@ -247,7 +247,8 @@ linux_add_watch(struct pn_watch *watch)
 			/* XXX-FIXME this overwrites watch->wd as assigned earlier! */
 			watch->wd = inotify_add_watch(INOTIFY_FD, watch->ident.path, imask);
 			if (watch->wd < 0) {
-				perror("inotify_add_watch(2) failed");
+				warnx("inotify_add_watch(2) failed (fn=`%s')", 
+					watch->ident.path);
 				return -1;
 			}
 			break;
