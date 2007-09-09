@@ -86,6 +86,7 @@ default_signal_handler(int signum)
 			break;
 		default:
 			fprintf(stderr, "Caught signal %d but no handler..\n", signum);
+			exit(254);
 	}
 }
 

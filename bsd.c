@@ -34,7 +34,6 @@
 
 /* Forward declarations */
 static int kq_directory_event_handler(struct kevent kev, struct pn_watch * watch);
-static int directory_open(struct pn_watch * watch);
 static int directory_scan(struct pn_watch * watch);
 void bsd_dump_kevent(struct kevent *kev);
 
@@ -42,9 +41,8 @@ void bsd_dump_kevent(struct kevent *kev);
 static int KQUEUE_FD = -321;
 
 static void
-bsd_handle_fd_event(struct pn_watch *watch)
+bsd_handle_fd_event(struct pn_watch *watch, struct kevent *kev)
 {
-	struct kevent *kev = &watch->kev;
 	int mask = 0;
 
 	/* Set the mask */
@@ -63,9 +61,8 @@ bsd_handle_fd_event(struct pn_watch *watch)
 
 
 static void
-bsd_handle_vnode_event(struct pn_watch *watch)
+bsd_handle_vnode_event(struct pn_watch *watch, struct kevent *kev)
 {
-	struct kevent *kev = &watch->kev;
 	char *fn = NULL;
 	int mask = 0;
 
@@ -77,7 +74,7 @@ bsd_handle_vnode_event(struct pn_watch *watch)
 
 	   We ignore the NOTE_DELETE on the file.
 	 */
-	if (watch->parent_wd && kev->fflags & NOTE_DELETE) {
+	if (watch->parent_wd && (kev->fflags & NOTE_DELETE)) {
 		dprintf("ignoring NOTE_DELETE on a watched file\n");
 		return;
 	}
@@ -108,6 +105,8 @@ bsd_handle_vnode_event(struct pn_watch *watch)
 			} else {
 				fn++;
 			}
+			// WORKROUND: return the parent wd
+			watch->wd = watch->parent_wd;  // CRAP !!!!
 		}
 
 		/* Add the event to the list of pending events */
@@ -160,10 +159,10 @@ bsd_kqueue_loop()
 		/* Handle the event */
 		switch (watch->type) {
 			case WATCH_FD:
-				bsd_handle_fd_event(watch);
+				bsd_handle_fd_event(watch, &kev);
 				break;
 			case WATCH_VNODE:
-				bsd_handle_vnode_event(watch);
+				bsd_handle_vnode_event(watch, &kev);
 				break;
 			default:
 				errx(1, "invalid watch type %d", watch->type);
@@ -240,6 +239,7 @@ bsd_dump_kevent(struct kevent *kev)
 int
 bsd_add_vnode_watch(struct pn_watch *watch)
 {
+	struct directory * dir;
 	struct stat     st;
 
 	/* Open the file */
@@ -256,8 +256,34 @@ bsd_add_vnode_watch(struct pn_watch *watch)
 	watch->is_dir = S_ISDIR(st.st_mode);
 
 	/* Initialize the directory structure, if needed */
-	if (watch->is_dir) 
-		directory_open(watch);
+	if (watch->is_dir) {
+
+		dir = &watch->dir;
+
+		/* Initialize the li_directory structure */
+		LIST_INIT(&dir->all);
+		if ((dir->dirp = opendir(watch->ident.path)) == NULL) {
+			perror("opendir(2)");
+			return -1;
+		}
+
+		/* Store the pathname */
+		dir->path_len = strlen(watch->ident.path) + 1;
+		if ((dir->path_len >= PATH_MAX) || 
+				((dir->path = malloc(dir->path_len + 1)) == NULL)) {
+			perror("malloc(3)");
+			return -1;
+		}
+		strncpy(dir->path, watch->ident.path, dir->path_len);
+
+		/* Scan the directory */
+		if (directory_scan(watch) < 0) {
+			warn("directory_scan failed");
+			return -1;
+		}
+
+	}
+
 	return 0;
 }
 
@@ -339,41 +365,6 @@ bsd_rm_watch(struct pn_watch *watch)
 	return 0;
 }
 
-/**
- Open a watched directory.
-*/
-static int
-directory_open(struct pn_watch * watch)
-{
-	struct directory * dir;
-
-	dir = &watch->dir;
-
-	/* Initialize the li_directory structure */
-	LIST_INIT(&dir->all);
-	if ((dir->dirp = opendir(watch->ident.path)) == NULL) {
-		perror("opendir(2)");
-		return -1;
-	}
-
-	/* Store the pathname */
-	dir->path_len = strlen(watch->ident.path) + 1;
-	if ((dir->path_len >= PATH_MAX) || 
-		((dir->path = malloc(dir->path_len + 1)) == NULL)) {
-			perror("malloc(3)");
-			return -1;
-	}
-	strncpy(dir->path, watch->ident.path, dir->path_len);
-		
-	/* Scan the directory */
-	if (directory_scan(watch) < 0) {
-		warn("directory_scan failed");
-		return -1;
-	}
-
-	return 0;
-}
-
 
 /**
  Scan a directory looking for new, modified, and deleted files.
@@ -386,8 +377,8 @@ directory_scan(struct pn_watch * watch)
 	struct dirent   ent, *entp;
 	struct dentry  *dptr;
 	bool            found;
-	char            path[PATH_MAX + 1];
-	char           *cp;
+	char           *path;
+	size_t    len;
 	struct stat	st;
 
 	assert(watch != NULL);
@@ -395,10 +386,6 @@ directory_scan(struct pn_watch * watch)
 	dir = &watch->dir;
 
 	dprintf("scanning directory\n");
-
-	/* Generate the basename */
-	(void) snprintf((char *) &path, PATH_MAX, "%s/", dir->path);
-	cp = path + dir->path_len + 1;
 
 	/* 
 	 * Invalidate the status mask for all entries.
@@ -470,27 +457,48 @@ directory_scan(struct pn_watch * watch)
 			dptr->mask = PN_CREATE;
 
 			/* Generate the full pathname */
-			// BUG: name_max is not precise enough
-			strncpy(cp, ent.d_name, NAME_MAX + 1);
+			len = dir->path_len + strlen(ent.d_name) + 2;
+			if ((path = malloc(len)) == NULL) {
+				perror("malloc(3)");
+				free(dptr);
+				return -1;
+			}
+			snprintf(path, len, "%s/%s", dir->path, ent.d_name);
 
 			/* Get the file status */
-			if (stat((char *) &path, &st) < 0) {
-				warn("stat(2) of `%s' failed", (char *) &path);
+			dprintf("stat(2) of %s\n", path);
+			if (stat(path, &st) < 0) {
+				warn("stat(2) of `%s' failed", path);
+				free(dptr);
+				free(path);
 				return -1;
 			}
 
 			/* Add a watch if it is a regular file */
-			if (S_ISREG(st.st_mode)) {
+			if (st.st_mode & S_IFREG) {
 				int wd;
+				dprintf("adding subwatch on %s\n", path);
 
+				// WORKAROUND: the kqueue thread has no context
+				//		and the API doesn't allow explicit context
+				//		setting..
+				CTX_SET(watch->ctx);
+				//FIXME -- free() on failure
 				wd = pnotify_watch_vnode(path, watch->mask, NULL);
+
+				// WORKAROUND: dont leave the context laying around..
+				CTX_SET(NULL);
+
 				if (wd < 0)
 					return -1;
 				wtmp = pn_get_watch_by_id(wd);
+				if (!wtmp)
+					abort();
 				wtmp->parent_wd = watch->wd;
 			}
 
 			LIST_INSERT_HEAD(&dir->all, dptr, entries);
+			free(path);	
 		}
 	}
 
