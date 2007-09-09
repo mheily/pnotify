@@ -46,10 +46,7 @@
  *
  * This variable must always be accessed using the GET and SET methods.
  */
-static pthread_key_t CTX_KEY;
-
-#define CTX_GET()      ((struct pnotify_ctx *) pthread_getspecific(CTX_KEY))
-#define CTX_SET(ctx)   (pthread_setspecific(CTX_KEY, ctx))
+pthread_key_t CTX_KEY;
 
 
 /* Define the system-specific vtable.  */
@@ -167,6 +164,7 @@ pnotify_add_watch(struct pnotify_watch *watch)
 	/* Get the context */
 	if (!watch->ctx)
 		watch->ctx = CTX_GET();
+	assert(watch->ctx);
 
 	/* Allocate a new entry */
 	if ((_watch = malloc(sizeof(*_watch))) == NULL) {

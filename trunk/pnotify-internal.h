@@ -51,6 +51,10 @@
 # error "This library has not been ported to your operating system"
 #endif
 
+#define CTX_GET()      ((struct pnotify_ctx *) pthread_getspecific(CTX_KEY))
+#define CTX_SET(ctx)   (pthread_setspecific(CTX_KEY, ctx))
+extern pthread_key_t CTX_KEY;
+
 /** An event */
 struct pnotify_event {
 
