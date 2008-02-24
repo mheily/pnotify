@@ -28,8 +28,15 @@
 
 #if defined(__linux__)
 
+#define USE_INOTIFY 0 
+/* NOTE: 
+
+   inotify is too recent to rely on; Sarge doesn't have it.
+
+     http://www.mail-archive.com/debian-glibc@lists.debian.org/msg32858.html
+*/
 #include <sys/epoll.h>
-#include <sys/inotify.h>
+#include <linux/inotify.h>
 
 static int INOTIFY_FD = -1;
 static int EPOLL_FD = -1;
@@ -167,9 +174,16 @@ linux_init_once(void)
 {
 	pthread_t tid;
 
+#if USE_INOTIFY
 	/* Create an inotify descriptor */
 	if ((INOTIFY_FD = inotify_init()) < 0)
 		err(1, "inotify_init(2)");
+
+        /* Create a dedicated inotify thread */
+	if (pthread_create( &tid, NULL, linux_inotify_loop, NULL ) != 0)
+		errx(1, "pthread_create(3) failed");
+
+#endif 
 
 	/* Create an epoll descriptor */
 	if ((EPOLL_FD = epoll_create(1000)) < 0)
@@ -177,10 +191,6 @@ linux_init_once(void)
 
         /* Create a dedicated epoll thread */
 	if (pthread_create( &tid, NULL, linux_epoll_loop, NULL ) != 0)
-		errx(1, "pthread_create(3) failed");
-
-        /* Create a dedicated inotify thread */
-	if (pthread_create( &tid, NULL, linux_inotify_loop, NULL ) != 0)
 		errx(1, "pthread_create(3) failed");
 
 	/* TODO: push cleanup function */
@@ -233,6 +243,7 @@ linux_add_watch(struct watch *watch)
 			if (mask & PN_ONESHOT)
 				imask |= IN_ONESHOT;
 
+#if USE_INOTIFY
 			/* Add the event to the kernel event queue */
 			watch->wd = inotify_add_watch(INOTIFY_FD, watch->ident.path, imask);
 			if (watch->wd < 0) {
@@ -240,6 +251,11 @@ linux_add_watch(struct watch *watch)
 					watch->ident.path);
 				return -1;
 			}
+#else
+			warn("inotify is not supported");
+			return -1;
+#endif
+
 			break;
 
 		default:
@@ -253,10 +269,12 @@ linux_add_watch(struct watch *watch)
 int
 linux_rm_watch(struct watch *watch)
 {
+#if USE_INOTIFY
 	if (inotify_rm_watch(INOTIFY_FD, watch->wd) < 0) {
 		perror("inotify_rm_watch(2)");
 		return -1;
 	}
+#endif
 
 	return 0;
 }
