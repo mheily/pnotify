@@ -34,7 +34,7 @@
 static int INOTIFY_FD = -1;
 static int EPOLL_FD = -1;
 
-int _get_inotify_event(struct pnotify_event *evt, struct pnotify_ctx *ctx);
+int _get_inotify_event(struct event *evt, struct pnotify_ctx *ctx);
 
 void linux_dump_inotify_event(struct inotify_event *iev);
 
@@ -273,7 +273,7 @@ linux_rm_watch(struct pn_watch *watch)
 }
 
 int
-_get_inotify_event(struct pnotify_event *evt, struct pnotify_ctx *ctx)
+_get_inotify_event(struct event *evt, struct pnotify_ctx *ctx)
 {
 
 

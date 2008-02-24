@@ -35,35 +35,8 @@
 #include "pnotify-internal.h"
 #include "pnotify.h"
 
-/** The context that should receive each signal event, indexed by signal number */
-static struct pnotify_ctx *SIGNAL_CTX[NSIG + 1];
-static pthread_mutex_t SIGNAL_CTX_MUTEX = PTHREAD_MUTEX_INITIALIZER;
-
-
-/**
- * Trap a specific signal and generate an event when it is received.
- *
- * @param ctx the context that should receive the signal event
- * @param signum the signal number to be trapped
-*/
-int
-pn_trap_signal(struct pnotify_ctx *ctx, int signum)
-{
-	int retval = 0;
-
-	assert(ctx && signum);
-
-	mutex_lock(ctx);
-	pthread_mutex_lock(&SIGNAL_CTX_MUTEX);
-
-	/* Update the SIGNAL structure */
-	SIGNAL_CTX[signum] = ctx;
-
-	pthread_mutex_unlock(&SIGNAL_CTX_MUTEX);
-	mutex_unlock(ctx);
-
-	return retval;
-}
+/** The watch for each signal event, indexed by signal number */
+struct watch *SIG_WATCH[NSIG + 1];
 
 
 static void
@@ -94,11 +67,11 @@ void *
 pn_signal_loop(void * unused)
 {
 	sigset_t signal_set;
-	struct pnotify_ctx *ctx;
+	struct watch *watch;
 	int signum;
 
 	/* Avoid a compiler warning */
-	ctx = unused;
+	watch = unused;
 
 	/* Loop forever waiting for signals */
 	for (;;) {
@@ -109,17 +82,16 @@ pn_signal_loop(void * unused)
 		dprintf("sigwait..\n");
 		sigwait(&signal_set, &signum);
 
-		/* Get the delivery context, or ignore the signal */
-		pthread_mutex_lock(&SIGNAL_CTX_MUTEX);
-		ctx = SIGNAL_CTX[signum];
-		pthread_mutex_unlock(&SIGNAL_CTX_MUTEX);
-		if (!ctx) {
+		/* Determine if the signal is being watched */
+		watch = SIG_WATCH[signum];
+		if (watch != NULL) {
+			/* Add the event to an event queue */
+			pn_event_add(watch, PN_SIGNAL);
+		} else {
 			default_signal_handler(signum);
 			continue;
 		}
 
-		/* Add the event to an event queue */
-		pn_event_add(pn_get_watch_by_id(signum), PN_SIGNAL, NULL);
 	}
 
 	return NULL;

@@ -33,7 +33,7 @@ struct pn_timer {
 	int remaining;
 
 	/** The watch associated with the timer event */
-	struct pn_watch *watch;
+	struct watch *watch;
 
 	/** Pointers to the next and previous list entries */
 	LIST_ENTRY(pn_timer) entries;
@@ -83,7 +83,7 @@ timer_disable()
 
 
 int
-pn_add_timer(struct pn_watch *watch)
+pn_add_timer(struct watch *watch)
 {
 	struct pn_timer *timer;
 
@@ -111,7 +111,7 @@ pn_add_timer(struct pn_watch *watch)
 
 
 int
-pn_rm_timer(struct pn_watch *watch)
+pn_rm_timer(struct watch *watch)
 {
 	struct pn_timer *timer, *tmp;
 
@@ -166,7 +166,7 @@ pn_timer_loop(void *unused)
 			if (TIMER_INTERVAL > timer->remaining) {
 
 				/* Add the event to an event queue */
-				pn_event_add(timer->watch, PN_TIMEOUT, NULL);
+				pn_event_add(timer->watch, PN_TIMEOUT);
 
 				/* Reset the timer to it's initial value */
 				timer->remaining = timer->watch->ident.interval;
@@ -175,7 +175,7 @@ pn_timer_loop(void *unused)
 				if (timer->watch->mask & PN_ONESHOT) {
 
 					/* Delete the watch*/
-					pn_rm_watch(timer->watch);
+					watch_cancel(timer->watch);
 
 					/* Delete the timer entry */
 					LIST_REMOVE(timer, entries);
