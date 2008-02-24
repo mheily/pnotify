@@ -121,7 +121,7 @@ pnotify_init()
 		return NULL;
 	}
 		
-	TAILQ_INIT(&ctx->event);
+	STAILQ_INIT(&ctx->event);
 
 	/* Set the global per-thread context variable */
 	CTX_SET(ctx);
@@ -217,9 +217,9 @@ retry:
 
 	/* Shift the first element off of the pending event queue */
 	mutex_lock(ctx);
-	if (!TAILQ_EMPTY(&ctx->event)) {
-		evp = TAILQ_FIRST(&ctx->event);
-		TAILQ_REMOVE(&ctx->event, evp, entries);
+	if (!STAILQ_EMPTY(&ctx->event)) {
+		evp = STAILQ_FIRST(&ctx->event);
+		STAILQ_REMOVE_HEAD(&ctx->event, entries);
 		mutex_unlock(ctx);
 		memcpy(evt, evp, sizeof(*evt));
 		free(evp);
@@ -255,7 +255,7 @@ pnotify_dump(struct pnotify_ctx *ctx)
 	mutex_lock(ctx);
 
 	printf("\npending events:\n");
-	TAILQ_FOREACH(evt, &ctx->event, entries) {
+	STAILQ_FOREACH(evt, &ctx->event, entries) {
 		printf("\t");
 		(void) pnotify_print_event(evt);
 	}
@@ -287,9 +287,9 @@ pnotify_free(struct pnotify_ctx *ctx)
 #endif
 
 	/* Delete all pending events */
-  	evt = TAILQ_FIRST(&ctx->event);
+  	evt = STAILQ_FIRST(&ctx->event);
         while (evt != NULL) {
-		nxt = TAILQ_NEXT(evt, entries);
+		nxt = STAILQ_NEXT(evt, entries);
 		free(evt);
 		evt = nxt;
     	}
@@ -413,7 +413,7 @@ pn_event_add(struct watch *watch, int mask)
 
 	/* Assign the event to a context */
 	mutex_lock(watch->ctx);
-	TAILQ_INSERT_HEAD(&watch->ctx->event, evt, entries);
+	STAILQ_INSERT_HEAD(&watch->ctx->event, evt, entries);
 	mutex_unlock(watch->ctx);
 
 	/* Increase the event counter, waking the thread */

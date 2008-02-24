@@ -42,14 +42,7 @@
  *
 */
 
-/* kqueue(4) in MacOS/X does not support NOTE_TRUNCATE */
-#ifndef NOTE_TRUNCATE
-# define NOTE_TRUNCATE 0
-#endif
-
 /* Opaque structures */
-
-struct event;
 struct pnotify_ctx;
 
 /** The type of resource to be watched */
@@ -180,9 +173,28 @@ struct watch {
 
 #endif
 
-	/* Pointer to the next watch */
-	LIST_ENTRY(watch) entries;
+	/* (LIST_ENTRY) Pointer to the next/previous watches */
+	struct {
+		struct watch *le_next;   /* next element */
+		struct watch **le_prev;  /* address of previous next element */
+	} entries;
 };
+
+/** An event */
+struct event {
+
+	/** The watch that is interested in this event  */
+	struct watch *watch;
+
+	/** One or more bitflags containing the event(s) that occurred */
+	int       mask;
+
+	/** (STAILQ_ENTRY) Pointers to the next list element */
+	struct { 
+		struct event *stqe_next; /* next element */
+	} entries;
+};
+
 
 
 /**
