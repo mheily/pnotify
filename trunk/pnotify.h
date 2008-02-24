@@ -179,6 +179,9 @@ struct watch {
 
 	struct epoll_event epoll_evt;
 
+	/** The watch descriptor returned by inotify */
+	int wd;
+
 #endif
 
 	/* Pointer to the next watch */

@@ -34,15 +34,12 @@
 static int INOTIFY_FD = -1;
 static int EPOLL_FD = -1;
 
-int _get_inotify_event(struct event *evt, struct pnotify_ctx *ctx);
-
 void linux_dump_inotify_event(struct inotify_event *iev);
-
 
 void *
 linux_inotify_loop(void * unused)
 {
-	struct pn_watch *watch;
+	struct watch *watch, *tmp;
 	struct inotify_event *iev, *endp;
 	ssize_t         bytes;
 	char            buf[4096];
@@ -77,11 +74,17 @@ linux_inotify_loop(void * unused)
 				goto next_event;
 				
 			/* Find the matching watch structure */
-			/* FIXME: This may be a normal occurrance
-			 * when a watch is removed when there are
-			 * still events pending.. ?
-			 */
-			if ((watch = pn_get_watch_by_id(iev->wd)) == NULL) {
+			/* TODO: Use a lookup table to make this O(1) instead of O(N) */
+			pthread_mutex_lock(&WATCH_MUTEX);
+			LIST_FOREACH_SAFE(watch, &WATCH, entries, tmp) {
+				if (watch->wd == iev->wd) {
+					tmp = watch;
+					break;
+				}
+			}
+			pthread_mutex_unlock(&WATCH_MUTEX);
+
+			if (tmp != watch) {
 				warnx("watch # %d not found\n", iev->wd);	
 				linux_dump_inotify_event(iev);
 				continue;
@@ -99,11 +102,10 @@ linux_inotify_loop(void * unused)
 				mask |= PN_DELETE;
 			if (iev->mask & IN_DELETE_SELF) {
 				mask |= PN_DELETE;
-				// XXX - FIXME - (void) strncpy(evt->name, "", 0);
 			}
 
 			/* Add the event to the list of pending events */
-			pn_event_add(watch, mask, iev->name);
+			pn_event_add(watch, mask);
 
 next_event:
 			/* Go to the next event */
@@ -120,7 +122,7 @@ void *
 linux_epoll_loop(void * unused)
 {
 	static const int maxevents = 100;
-	struct pn_watch *watch;
+	struct watch *watch;
 	struct epoll_event events[maxevents];
 	int i, mask, numevents;
 
@@ -139,19 +141,7 @@ linux_epoll_loop(void * unused)
 		/* Convert each epoll event into a pnotify event */
 		for (i = 0; i < numevents; i++) {
 
-			watch = (struct pn_watch *) events[i].data.ptr;	
-
-#if DEAD
-			/* Get the delivery context, or ignore the signal */
-			pthread_mutex_lock(&SIGNAL_CTX_MUTEX);
-			ctx = SIGNAL_CTX[signum];
-			pthread_mutex_unlock(&SIGNAL_CTX_MUTEX);
-			if (!ctx) {
-				default_signal_handler(signum);
-				continue;
-			}
-#endif
-
+			watch = (struct watch *) events[i].data.ptr;	
 			mask = 0;
 			if (events[i].events & EPOLLIN)
 				mask |= PN_READ;
@@ -163,7 +153,7 @@ linux_epoll_loop(void * unused)
 				mask |= PN_ERROR;
 
 			/* Add the event to an event queue */
-			pn_event_add(watch, mask, NULL);
+			pn_event_add(watch, mask);
 		}
 	}
 
@@ -205,7 +195,7 @@ linux_cleanup(void)
 
 
 int
-linux_add_watch(struct pn_watch *watch)
+linux_add_watch(struct watch *watch)
 {
 	struct epoll_event *ev = &watch->epoll_evt;
 	int mask = watch->mask;
@@ -226,7 +216,7 @@ linux_add_watch(struct pn_watch *watch)
 			if (epoll_ctl(EPOLL_FD, EPOLL_CTL_ADD, watch->ident.fd, ev) < 0) {
 				warn("epoll_ctl(2) failed");
 				return -1;
-			}
+				}
 			dprintf("added epoll watch for fd #%d", watch->ident.fd);
 			break;
 
@@ -244,7 +234,6 @@ linux_add_watch(struct pn_watch *watch)
 				imask |= IN_ONESHOT;
 
 			/* Add the event to the kernel event queue */
-			/* XXX-FIXME this overwrites watch->wd as assigned earlier! */
 			watch->wd = inotify_add_watch(INOTIFY_FD, watch->ident.path, imask);
 			if (watch->wd < 0) {
 				warnx("inotify_add_watch(2) failed (fn=`%s')", 
@@ -262,7 +251,7 @@ linux_add_watch(struct pn_watch *watch)
 }
 
 int
-linux_rm_watch(struct pn_watch *watch)
+linux_rm_watch(struct watch *watch)
 {
 	if (inotify_rm_watch(INOTIFY_FD, watch->wd) < 0) {
 		perror("inotify_rm_watch(2)");
@@ -272,24 +261,6 @@ linux_rm_watch(struct pn_watch *watch)
 	return 0;
 }
 
-int
-_get_inotify_event(struct event *evt, struct pnotify_ctx *ctx)
-{
-
-
-	return 0;
-}
-
-int
-linux_trap_signal(struct pnotify_ctx *ctx, int signum)
-{
-	/* Linux does not have a kernel mechanism for
-	 * converting signals to events but if it did,
-	 * this would be the place to activate it.
-	 */
-	assert(ctx && signum);
-	return 0;
-}
 
 void
 linux_dump_inotify_event(struct inotify_event *iev)
