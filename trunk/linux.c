@@ -26,7 +26,7 @@
  *
 */
 
-#if HAVE_INOTIFY
+#if defined(__linux__)
 
 #include <sys/epoll.h>
 #include <sys/inotify.h>
