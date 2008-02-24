@@ -19,6 +19,21 @@
 #ifndef _PNOTIFY_H
 #define _PNOTIFY_H
 
+
+#include <sys/types.h>
+
+/* System-specific headers */
+#if defined(__linux__)
+# define HAVE_INOTIFY 1
+# include <sys/inotify.h>
+# include <sys/epoll.h>
+#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__Darwin__)
+# define HAVE_KQUEUE 1
+# include <sys/event.h>
+#else
+# error "This library has not been ported to your operating system"
+#endif
+
 /** @file
  *
  *  Public header for the pnotify library.
@@ -39,124 +54,8 @@
 
 /* Opaque structures */
 struct pnotify_buffer;
-struct pnotify_event;
+struct event;
 struct pnotify_ctx;
-
-/** The maximum number of arguments that can be passed to an async function */
-#define PNOTIFY_ARG_MAX 8
-
-/** An element in an argument vector */
-union pnotify_arg {
-	int    arg_int;
-	long   arg_long;
-};
-
-/** A function to be invoked asynchronously */
-struct pn_callback {
-
-	/** The address of the function entry point */
-	int (*symbol)();
-
-	/** The number of arguments to pass to the function */
-	size_t argc;
-
-	/** An argument vector */
-	union pnotify_arg argv[PNOTIFY_ARG_MAX + 1];
-
-	/** The size of each argument in <argv> */
-	enum {
-		/** Four bytes */
-		PN_TYPE_INT,
-
-		/** Four bytes on x86, or eight bytes on amd64 */
-		PN_TYPE_LONG,
-
-	} argt[PNOTIFY_ARG_MAX + 1];
-
-	/* -- filled in by the function when it returns -- */
-
-	/** The return value of the function */
-	int retval;
-
-	/** The value of the global 'errno' immediately after the function call */
-	int saved_errno;
-};
-
-
-/**
- * Encode a function call.
- *
- * Given the address of a function, and zero or more arguments, this macro 
- * constructs a constant anonymous pn_callback structure and returns a 
- * pointer to the newly created structure.
- *
- * Limitations:
- *   * Type checking is NOT performed
- *   * Cannot be used to call macros
- *   * Cannot be used with variadic functions
- *   * Arguments must be 32-bit or 64-bit integers, or pointers
- *   * Functions must have an int return value
- *   * No more than PN_ARG_MAX arguments can be passed to the function
- *
- * @param sym function address
- * @param argc argument count
- * @param ... one or more parameters
- * @return a pointer to a constant pn_callback structure containing all
- * the information needed to call the function at a later date.
- */
-#define CB_ENCODE(sym,argc,...) _CB_SET##argc(sym,__VA_ARGS__)
-
-#define _ARG_SET(n,v) .argv[n] = (sizeof(v) == sizeof(long)) ? (long) v : (int) v, \
-                      .argt[n] = (sizeof(v) == sizeof(long)) ? PN_TYPE_LONG : PN_TYPE_INT,
-
-#define _CB_SET0(sym,unused)                                                  \
-          &((struct pn_callback) { .symbol = sym, .argc = 0 })
-
-#define _CB_SET1(sym,x0)                                                      \
-          &((struct pn_callback) { .symbol = sym, .argc = 1,                  \
-             _ARG_SET(0, x0)})
-
-#define _CB_SET2(sym,x0,x1)                                                   \
-          &((struct pn_callback) { .symbol = sym, .argc = 2,                  \
-             _ARG_SET(0, x0) _ARG_SET(1, x1)})
-
-#define _CB_SET3(sym,x0,x1,x2)                                                \
-          &((struct pn_callback) { .symbol = sym, .argc = 3,                  \
-             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2)})
-
-#define _CB_SET4(sym,x0,x1,x2,x3)                                             \
-          &((struct pn_callback) { .symbol = sym, .argc = 4,                  \
-             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)})
-
-#define _CB_SET5(sym,x0,x1,x2,x3,x4)                                          \
-          &((struct pn_callback) { .symbol = sym, .argc = 5,                  \
-             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
-             _ARG_SET(4, x4)})
-
-#define _CB_SET6(sym,x0,x1,x2,x3,x4,x5)                                       \
-          &((struct pn_callback) { .symbol = sym, .argc = 6,                  \
-             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
-             _ARG_SET(4, x4) _ARG_SET(5, x5)})
-
-#define _CB_SET7(sym,x0,x1,x2,x3,x4,x5,x6)                                    \
-          &((struct pn_callback) { .symbol = sym, .argc = 7,                  \
-             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
-             _ARG_SET(4, x4) _ARG_SET(5, x5) _ARG_SET(6, x6)})
-
-#define _CB_SET8(sym,x0,x1,x2,x3,x4,x5,x6,x7)                                 \
-          &((struct pn_callback) { .symbol = sym, .argc = 8,                  \
-             _ARG_SET(0, x0) _ARG_SET(1, x1) _ARG_SET(2, x2) _ARG_SET(3, x3)  \
-             _ARG_SET(4, x4) _ARG_SET(5, x5) _ARG_SET(6, x6) _ARG_SET(7, x7)})
-
-/** Decode an encoded function call and invoke the function */
-#define CB_INVOKE(rv,f) do {                                                  \
-   switch (f->argc) {                                                         \
-      case 0: rv = f->symbol(); \
-      default: errx(1, "invalid function encoding");                          \
-   }} while (0)
-
-/** Invoke a function asynchronously and generate an event when it returns. */
-int pnotify_call_function(struct pn_callback *fn, struct pn_callback *cb);
 
 /** The type of resource to be watched */
 enum pn_watch_type {
@@ -171,9 +70,6 @@ enum pn_watch_type {
 
 	/** Signals from the operating system */
 	WATCH_SIGNAL,
-	
-	/** User-defined asynchronous function call */
-	WATCH_FUNCTION
 };
 
 
@@ -206,11 +102,6 @@ union pn_resource_id {
 	 * various events are generated.
 	 */
 	char *path;
-
-	/**
-	 * An asynchronous function call
-	 */
-	struct pn_callback *func;
 };
 
 
@@ -247,9 +138,6 @@ enum pn_event_bitmask {
 	/** A signal was received */
 	PN_SIGNAL               = 0x1 << 8,  
 
-	/** An asynchronous function call has completed */
-	PN_RETURN               = 0x1 << 9,
-
 	/** Delete the watch after a matching event occurs */
 	PN_ONESHOT		= 0x1 << 30,
 
@@ -260,10 +148,8 @@ enum pn_event_bitmask {
 
 /**
  * A watch request.
- *
- * @see pn_watch, used internally to track each watch
  */
-struct pnotify_watch {
+struct watch {
 
 	/** The type of resource to be watched */
 	enum pn_watch_type type;
@@ -275,10 +161,28 @@ struct pnotify_watch {
 	union pn_resource_id ident;
 
 	/** A callback to be invoked when a matching event occurs */
-	struct pn_callback *cb;
+	void (*cb)();
+	void *arg;
 
 	/** The context that receives the event */
 	struct pnotify_ctx *ctx;
+
+#if HAVE_KQUEUE
+
+	/* The associated kernel event structure */
+	struct kevent    kev;
+
+	/* Each watched file must be opened first, this is the fd tha is used */
+	int wfd;
+
+#elif HAVE_INOTIFY
+
+	struct epoll_event epoll_evt;
+
+#endif
+
+	/* Pointer to the next watch */
+	LIST_ENTRY(watch) entries;
 };
 
 
@@ -298,38 +202,38 @@ struct pnotify_ctx * pnotify_init();
   @param watch a watch structure
   @return a unique watch descriptor if successful, or -1 if an error occurred.
 */
-int pnotify_add_watch(struct pnotify_watch *watch);
+int pnotify_add_watch(struct watch *watch);
+
 
 /**
   Remove a watch.
 
-  @param wd watch descriptor
+  @param watch watch 
   @return 0 if successful, or non-zero if an error occurred.
 */
-int pnotify_rm_watch(int wd);
+int watch_cancel(struct watch *watch);
 
 
 /**
   Wait for an event to occur.
 
   @param evt an event structure that will store the result
-  @param ctx a context returned by pnotify_init() or NULL for the current context
   @return 0 if successful, or non-zero if an error occurred.
 */
-int pnotify_get_event(struct pnotify_event *, struct pnotify_ctx *);
+int event_wait(struct event *);
 
 /**
  * Wait for events and dispatch callbacks.
  *
  * @return -1 if an error occurs, otherwise the function does not return
 */
-int pnotify_dispatch();
+int event_dispatch();
 
 /**
  Print debugging information about an event to standard output.
  @param evt an event to be printed
 */
-int pnotify_print_event(struct pnotify_event *);
+int pnotify_print_event(struct event *);
 
 
 /**
@@ -355,7 +259,7 @@ void pnotify_free(struct pnotify_ctx *ctx);
  * @param signum the signal to be trapped
  * @return a watch descriptor, or -1 if an error occurred
  */ 
-int pnotify_trap_signal(int signum, struct pn_callback *cb);
+struct watch * watch_signal(int signum, void (*cb)(), void *arg);
 
 /** Watch for changes to a vnode 
  *
@@ -363,10 +267,10 @@ int pnotify_trap_signal(int signum, struct pn_callback *cb);
  * @param mask a bitmask of events to monitor
  * @return a watch descriptor, or -1 if an error occurred
  */ 
-int pnotify_watch_vnode(const char *path, int mask, struct pn_callback *cb);
+struct watch * watch_vnode(const char *path, int mask, void (*cb)(), void *arg);
 
 /** Watch for changes to a file descriptor */
-int pnotify_watch_fd(int fd, int mask, struct pn_callback *cb); 
+struct watch * watch_fd(int fd, int mask, void (*cb)(), void *arg); 
 
 /** Set a timer to fire after specific number of seconds 
  *
@@ -377,6 +281,6 @@ int pnotify_watch_fd(int fd, int mask, struct pn_callback *cb);
  * @param interval the number of seconds between timer events
  * @param mask either PN_DEFAULT or PN_ONESHOT
  */
-int pnotify_set_timer(int interval, int mask, struct pn_callback *cb);
+struct watch * watch_timer(int interval, int mask, void (*cb)(), void *arg);
 
 #endif /* _PNOTIFY_H */

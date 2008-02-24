@@ -9,19 +9,25 @@
 .Sh SYNOPSIS
 .In pnotify.h
 .Pp
-.Fd int pnotify_init();
-.Fd int pnotify_add_watch(struct pnotify_watch *watch);
-.Fd int pnotify_rm_watch(int wd);
-.Fd int pnotify_get_event(struct pnotify_event *event);
-.Fd int pnotify_dispatch();
-.Fd int pnotify_trap_signal(int signum, void (*cb)(), void *arg);
-.Fd int pnotify_watch_vnode(char *path, int mask, void (*cb)(), void *arg);
-.Fd int pnotify_watch_fd(int fd, int mask, void (*cb)(), void *arg); 
-.Fd int pnotify_set_timer(int interval, int mask, void (*cb)(), void *arg);
-.Fd int pnotify_call_function(struct pn_callback *fn, void (*cb)(), void *arg);
-.Fd void pnotify_free();
+.Ft int
+.Fn pnotify_init
+.Ft void
+.Fn pnotify_free
+.Ft "struct watch *"
+.Fn watch_signal "int signum" "void (*cb)()" "void *arg"
+.Ft "struct watch *"
+.Fn watch_vnode "const char *path" "int mask" "void (*cb)()" "void *arg"
+.Ft "struct watch *"
+.Fn watch_fd "int fd" "int mask" "void (*cb)()" "void *arg"
+.Ft "struct watch *"
+.Fn "watch_timer" "int interval" "int mask" "void (*cb)()" "void *arg"
+.Ft "struct watch *"
+.Fn watch_cancel "struct watch *w"
+.Ft int
+.Fn event_wait "struct event *evt"
+.Ft int
+.Fn event_dispatch
 .Pp
-.Fd struct pn_callback * FUNC_ENCODE(function-addr, argc, argv[0] .. argv[n]);
 .Sh DESCRIPTION
 The
 .Nm
@@ -63,85 +69,62 @@ of events to watch for.
 They also take a callback function that will be invoked when the event occurs.
 The following functions are used to create watches:
 .Pp
-.Fn pnotify_trap_signal
+.Fn watch_signal
 causes an event to be generated when a signal is received by the process. The signal
 is otherwise blocked, and will not cause a signal handler to be run. 
 .Pp
-.Fn pnotify_watch_vnode
+.Fn watch_vnode
 causes an event to be generated when a file or directory is changed. 
 .Pp
-.Fn pnotify_watch_fd
+.Fn watch_fd
 causes an event to be generated when an open file descriptor is ready for reading,
 ready for writing, or closed by the remote end.
 .Pp
-.Fn pnotify_set_timer
+.Fn watch_timer
 causes an event to be generated at a regular interval.
 .Pp
-.Fn pnotify_call_function
-performs an asynchronous function call that generates a PN_RETURN event
-when the function returns. [TODO - document struct pn_callback]
-.Pp
-.Fn pnotify_add_event
-is a low-level function that adds a watch to the list of active watches. The only reason
-to use this function is to add an event to a different context than the current thread.
-.Pp
-When a watch is created, a unique watch descriptor is returned. To delete the watch,
+When a watch is created, a watch handle is returned. To delete the watch,
 call 
-.Fn pnotify_rm_watch
-and pass the watch descriptor as an argument.
+.Fn watch_cancel
+and pass the watch handle as an argument.
 .Sh ACTIONS
 Programs need to respond to events. When a watch is created, a callback function
 can be provided. This callback function will be executed each time a matching
 event occurs. It is also possible to process each event manually and construct
 your own event loop.
 .Pp
-.Fn pnotify_get_event
+.Fn event_wait
 waits for a single event to occur, and fills the pnotify_event structure with information
 about the event.  If an error occurs in the underlying kernel event queue, an
 event is returned with the PN_ERROR flag set.
 .Pp
-The pnotify_event structure contains the following fields:
+The event structure contains the following fields:
 .Bd -literal
-struct pnotify_event {
-        int       wd;
-        int       mask;
-        char      name[NAME_MAX + 1];
+struct event {
+	struct watch *watch;
+        int mask;
 };
 .Ed
 .Pp
-.Fn pnotify_dispatch
+.Fn event_dispatch
 waits for events and invokes the apropriate callback when an event occurs. 
 This function never returns, and is intended to serve as the applications main event loop.
-.Sh ASYNCHRONOUS FUNCTION CALLS
-To achieve a high level of concurrency in an event-driven server, it is important that the program never block while waiting for an I/O operation to complete. 
-.Nm
-offers a way to invoke a function call asynchronously, and continue processing without waiting for the the function to complete. When the function call returns, a PN_RETURN event is generated
-that contains the result of the function call.
-.Pp
-The
-.Fn FUNC_ENCODE
-macro encodes a function call into a form that 
-.Nm
-uses to perform an asynchronous function call. This macro takes the address of the function,
-the number of arguments, and zero or more arguments. 
 .Sh RETURN VALUES
-.Fn pnotify_add_watch
-returns a positive integer that represents a unique watch descriptor, or -1 if an error occurs.
-.Pp
+Functions which create watches return pointers to the newly created
+watch structure, or NULL if an error occurred.
 All other functions return zero if successful, or -1 if an error occurs.
 .Sh EXAMPLES
-The following example creates a watch on the /tmp directory and prints the 
-names of files that are created or deleted within the directory.
+The following example creates a watch on a file named /tmp/test.
 .Bd -literal
-struct pnotify_event evt;
+struct event evt;
 
 pnotify_init();
-pnotify_watch_vnode("/tmp", PN_CREATE | PN_DELETE, NULL, NULL);
-while (pnotify_get_event(&evt) == 0) {
-	if (evt.mask & PN_CREATE) 
-		printf("file created: %s", evt.name);
+watch_vnode("/tmp/test", PN_CREATE | PN_DELETE, NULL, NULL);
+while (event_wait(&evt) == 0) {
+	if (evt.mask & PN_MODIFY) 
+		printf("file modified");
 	if (evt.mask & PN_DELETE) 
-		printf("file deleted: %s", evt.name);
+		printf("file deleted");
 	if (evt.mask & PN_ERROR) {
 		printf("an error occurred");
 		break;
@@ -150,7 +133,7 @@ while (pnotify_get_event(&evt) == 0) {
 .Ed
 .Pp
 The next example shows how to use the
-.Fn pnotify_dispatch
+.Fn event_dispatch
 function. If the SIGHUP signal is sent to the process, it prints out a message. After
 five seconds, the program will terminate.
 .Bd -literal
@@ -168,9 +151,9 @@ void got_timeout()
 int main(int argc, char **argv)
 {
 	pnotify_init();
-	pnotify_trap_signal(SIGHUP, got_signal, NULL);
-	pnotify_set_timer(5, PN_ONESHOT, got_timeout, NULL);
-	pnotify_dispatch();
+	watch_signal(SIGHUP, got_signal, NULL);
+	watch_timer(5, PN_ONESHOT, got_timeout, NULL);
+	event_dispatch();
 	/* NOTREACHED */
 }
 .Ed
@@ -178,10 +161,8 @@ int main(int argc, char **argv)
 .Nm
 is a multi-threaded library and is fully threadsafe. Each thread must call
 .Fn pnotify_init
-before calling any other library functions. It is possible for one thread 
-to add a watch to another thread by setting the `ctx' context variable
-before calling
-.Fn pnotify_add_event
+before using any other library functions. Each thread has its own
+event list. 
 .Sh SEE ALSO
 .Xr kqueue 4
 .Xr inotify 7

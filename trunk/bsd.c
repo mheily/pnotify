@@ -33,15 +33,13 @@
 #include <sys/event.h>
 
 /* Forward declarations */
-static int kq_directory_event_handler(struct kevent kev, struct pn_watch * watch);
-static int directory_scan(struct pn_watch * watch);
 void bsd_dump_kevent(struct kevent *kev);
 
 /** The file descriptor returned by kqueue(2) */
-static int KQUEUE_FD = -321;
+static int KQUEUE_FD;
 
 static void
-bsd_handle_fd_event(struct pn_watch *watch, struct kevent *kev)
+bsd_handle_fd_event(struct watch *watch, struct kevent *kev)
 {
 	int mask = 0;
 
@@ -56,89 +54,32 @@ bsd_handle_fd_event(struct pn_watch *watch, struct kevent *kev)
 		errx(1, "invalid event mask");
 
 	/* Add the event to the list of pending events */
-	pn_event_add(watch, mask, NULL);
+	pn_event_add(watch, mask);
 }
 
 
 static void
-bsd_handle_vnode_event(struct pn_watch *watch, struct kevent *kev)
+bsd_handle_vnode_event(struct watch *watch, struct kevent *kev)
 {
-	char *fn = NULL;
 	int mask = 0;
 
-	/* Workaround:
-
-	   Deleting a file in a watched directory causes two events:
-	   NOTE_MODIFY on the directory
-	   NOTE_DELETE on the file
-
-	   We ignore the NOTE_DELETE on the file.
-	 */
-	if (watch->parent_wd && (kev->fflags & NOTE_DELETE)) {
-		dprintf("ignoring NOTE_DELETE on a watched file\n");
-		return;
-	}
-
 	/* Convert the kqueue(4) flags to pnotify_event flags */
-	if (!watch->is_dir) {
+	if ((kev->fflags & NOTE_WRITE) || (kev->fflags & NOTE_TRUNCATE) || (kev->flags & NOTE_EXTEND))
+		mask |= PN_MODIFY;
+	if (kev->fflags & NOTE_ATTRIB)
+		mask |= PN_ATTRIB;
+	if (kev->fflags & NOTE_DELETE)
+		mask |= PN_DELETE;
 
-		if (kev->fflags & NOTE_WRITE)
-			mask |= PN_MODIFY;
-		if (kev->fflags & NOTE_TRUNCATE)
-			mask |= PN_MODIFY;
-		if (kev->flags & NOTE_EXTEND)
-			mask |= PN_MODIFY;
-		if (kev->fflags & NOTE_ATTRIB)
-			mask |= PN_ATTRIB;
-		if (kev->fflags & NOTE_DELETE)
-			mask |= PN_DELETE;
-
-		/* If the event happened within a watched directory,
-		   add the filename and the parent watch descriptor.
-		 */
-		if (watch->parent_wd) {
-
-			/* KLUDGE: removes the leading basename */
-			fn = strrchr(watch->ident.path, '/') ;
-			if (!fn) { 
-				fn = watch->ident.path;
-			} else {
-				fn++;
-			}
-			// WORKROUND: return the parent wd
-			watch->wd = watch->parent_wd;  // CRAP !!!!
-		}
-
-		/* Add the event to the list of pending events */
-		pn_event_add(watch, mask, fn);
-
-		/* Handle events on directories */
-	} else {
-
-		/* When a file is added or deleted, NOTE_WRITE is set */
-		if (kev->fflags & NOTE_WRITE) {
-			if (kq_directory_event_handler(*kev, watch) < 0) {
-				warn("error processing diretory");
-				return;
-			}
-		}
-		/* FIXME: Handle the deletion of a watched directory */
-		else if (kev->fflags & NOTE_DELETE) {
-			warn("unimplemented - TODO");
-			return;
-		} else {
-			warn("unknown event recieved");
-			return;
-		}
-
-	}
+	/* Add the event to the list of pending events */
+	pn_event_add(watch, mask);
 }
 
 
 void *
 bsd_kqueue_loop()
 {
-	struct pn_watch *watch;
+	struct watch *watch;
 	struct kevent kev;
 	int rc;
 
@@ -154,7 +95,7 @@ bsd_kqueue_loop()
 		bsd_dump_kevent(&kev);
 
 		/* Find the matching watch structure */
-		watch = (struct pn_watch *) kev.udata;
+		watch = (struct watch *) kev.udata;
 
 		/* Handle the event */
 		switch (watch->type) {
@@ -219,7 +160,7 @@ bsd_dump_kevent(struct kevent *kev)
 		0 };
 	int i;
 
-	fprintf(stderr, "kevent: ident=%d filter=", kev->ident);
+	fprintf(stderr, "kevent: ident=%d filter=", (int) kev->ident);
 	for (i = 0; evfilt_val[i] != 0; i++) {
 		if (kev->filter == evfilt_val[i]) {
 			fprintf(stderr, "%s ", evfilt_nam[i]);
@@ -237,60 +178,10 @@ bsd_dump_kevent(struct kevent *kev)
 
 
 int
-bsd_add_vnode_watch(struct pn_watch *watch)
-{
-	struct directory * dir;
-	struct stat     st;
-
-	/* Open the file */
-	if ((watch->fd = open(watch->ident.path, O_RDONLY)) < 0) {
-		warn("opening path `%s' failed", watch->ident.path);
-		return -1;
-	}
-
-	/* Test if the file is a directory */
-	if (fstat(watch->fd, &st) < 0) {
-		warn("fstat(2) failed");
-		return -1;
-	}
-	watch->is_dir = S_ISDIR(st.st_mode);
-
-	/* Initialize the directory structure, if needed */
-	if (watch->is_dir) {
-
-		dir = &watch->dir;
-
-		/* Initialize the li_directory structure */
-		LIST_INIT(&dir->all);
-		if ((dir->dirp = opendir(watch->ident.path)) == NULL) {
-			perror("opendir(2)");
-			return -1;
-		}
-
-		/* Store the pathname */
-		dir->path_len = strlen(watch->ident.path) + 1;
-		if ((dir->path_len >= PATH_MAX) || 
-				((dir->path = malloc(dir->path_len + 1)) == NULL)) {
-			perror("malloc(3)");
-			return -1;
-		}
-		strncpy(dir->path, watch->ident.path, dir->path_len);
-
-		/* Scan the directory */
-		if (directory_scan(watch) < 0) {
-			warn("directory_scan failed");
-			return -1;
-		}
-
-	}
-
-	return 0;
-}
-
-int
-bsd_add_watch(struct pn_watch *watch)
+bsd_add_watch(struct watch *watch)
 {
 	struct kevent *kev = &watch->kev;
+	struct stat st;
 	int mask = watch->mask;
 	int filt = 0;
 
@@ -308,9 +199,23 @@ bsd_add_watch(struct pn_watch *watch)
 			break;
 
 		case WATCH_VNODE:
-			if (bsd_add_vnode_watch(watch) < 0)
+
+			/* Open the file */
+			if ((watch->wfd = open(watch->ident.path, O_RDONLY)) < 0) {
+				warn("opening path `%s' failed", watch->ident.path);
 				return -1;
-			EV_SET(kev, watch->fd, EVFILT_VNODE, EV_ADD | EV_CLEAR, 0, 0, watch);
+			}
+			if (fstat(watch->wfd, &st) != 0) {
+				close(watch->wfd);
+				return -1;
+			}
+			if (! S_ISREG(st.st_mode)) {
+				warn("cannot watch a non-regular file");
+				close(watch->wfd);
+				return -1;
+			}	
+
+			EV_SET(kev, watch->wfd, EVFILT_VNODE, EV_ADD | EV_CLEAR, 0, 0, watch);
 			if (mask & PN_ATTRIB)
 				kev->fflags |= NOTE_ATTRIB;
 			if (mask & PN_CREATE)
@@ -318,7 +223,7 @@ bsd_add_watch(struct pn_watch *watch)
 			if (mask & PN_DELETE)
 				kev->fflags |= NOTE_DELETE | NOTE_WRITE;
 			if (mask & PN_MODIFY)
-				kev->fflags |= NOTE_WRITE;
+				kev->fflags |= NOTE_WRITE | NOTE_EXTEND | NOTE_TRUNCATE;
 			break;
 
 		default:
@@ -343,201 +248,15 @@ bsd_add_watch(struct pn_watch *watch)
 
 
 int
-bsd_rm_watch(struct pn_watch *watch)
+bsd_rm_watch(struct watch *watch)
 {
 	/* Close the file descriptor.
 	  The kernel will automatically delete the kevent 
 	  and any pending events.
 	 */
-	if (close(watch->fd) < 0) {
+	if (close(watch->wfd) < 0) {
 		perror("unable to close watch fd");
 		return -1;
-	}
-
-	/* Close the directory handle */
-	if (watch->dir.dirp != NULL) {
-		if (closedir(watch->dir.dirp) != 0) {
-			perror("closedir(3)");
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-
-/**
- Scan a directory looking for new, modified, and deleted files.
- */
-static int
-directory_scan(struct pn_watch * watch)
-{
-	struct pn_watch *wtmp;
-	struct directory *dir;
-	struct dirent   ent, *entp;
-	struct dentry  *dptr;
-	bool            found;
-	char           *path;
-	size_t    len;
-	struct stat	st;
-
-	assert(watch != NULL);
-
-	dir = &watch->dir;
-
-	dprintf("scanning directory\n");
-
-	/* 
-	 * Invalidate the status mask for all entries.
-	 *  This is used to detect entries that have been deleted.
- 	 */
-	LIST_FOREACH(dptr, &dir->all, entries) {
-		dptr->mask = PN_DELETE;
-	}
-
-	/* Skip the initial '.' and '..' entries */
-	/* XXX-FIXME doesnt work with chroot(2) when '..' doesn't exist */
-	rewinddir(dir->dirp);
-	if (readdir_r(dir->dirp, &ent, &entp) != 0) {
-		perror("readdir_r(3)");
-		return -1;
-	}
-	if (strcmp(ent.d_name, ".") == 0) {
-		if (readdir_r(dir->dirp, &ent, &entp) != 0) {
-			perror("readdir_r(3)");
-			return -1;
-		}
-	}
-
-	/* Read all entries in the directory */
-	for (;;) {
-
-		/* Read the next entry */
-		if (readdir_r(dir->dirp, &ent, &entp) != 0) {
-			perror("readdir_r(3)");
-			return -1;
-		}
-
-		/* Check for the end-of-directory condition */
-		if (entp == NULL)
-			break;
- 
-		/* Perform a linear search for the dentry */
-		found = false;
-		LIST_FOREACH(dptr, &dir->all, entries) {
-
-			/*
-			 * FIXME - BUG - this doesnt handle hardlinks which
-			 * have the same d_fileno but different
-			 * dirent structs
-			 */
-			//should compare the entire dirent struct...
-			if (dptr->ent.d_fileno != ent.d_fileno) 
-				continue;
-
-			dprintf("old entry: %s\n", ent.d_name);
-			dptr->mask = 0;
-
-			found = true;
-			break;
-		}
-
-		/* Add the entry to the list, if needed */
-		if (!found) {
-			dprintf("new entry: %s\n", ent.d_name);
-
-			/* Allocate a new dentry structure */
-			if ((dptr = malloc(sizeof(*dptr))) == NULL) {
-				perror("malloc(3)");
-				return -1;
-			}
-
-			/* Copy the dirent structure */
-			memcpy(&dptr->ent, &ent, sizeof(ent));
-			dptr->mask = PN_CREATE;
-
-			/* Generate the full pathname */
-			len = dir->path_len + strlen(ent.d_name) + 2;
-			if ((path = malloc(len)) == NULL) {
-				perror("malloc(3)");
-				free(dptr);
-				return -1;
-			}
-			snprintf(path, len, "%s/%s", dir->path, ent.d_name);
-
-			/* Get the file status */
-			dprintf("stat(2) of %s\n", path);
-			if (stat(path, &st) < 0) {
-				warn("stat(2) of `%s' failed", path);
-				free(dptr);
-				free(path);
-				return -1;
-			}
-
-			/* Add a watch if it is a regular file */
-			if (st.st_mode & S_IFREG) {
-				int wd;
-				dprintf("adding subwatch on %s\n", path);
-
-				// WORKAROUND: the kqueue thread has no context
-				//		and the API doesn't allow explicit context
-				//		setting..
-				CTX_SET(watch->ctx);
-				//FIXME -- free() on failure
-				wd = pnotify_watch_vnode(path, watch->mask, NULL);
-
-				// WORKAROUND: dont leave the context laying around..
-				CTX_SET(NULL);
-
-				if (wd < 0)
-					return -1;
-				wtmp = pn_get_watch_by_id(wd);
-				if (!wtmp)
-					abort();
-				wtmp->parent_wd = watch->wd;
-			}
-
-			LIST_INSERT_HEAD(&dir->all, dptr, entries);
-			free(path);	
-		}
-	}
-
-	return 0;
-}
-
-
-
-/**
- Handle an event inside a directory (kqueue version)
-*/
-static int
-kq_directory_event_handler(struct kevent kev, struct pn_watch * watch)
-{
-	struct dentry  *dptr, *dtmp;
-
-	assert(watch);
-
-	/* Re-scan the directory to find new and deleted files */
-	if (directory_scan(watch) < 0) {
-		warn("directory_scan failed");
-		return -1;
-	}
-
-	/* Generate an event for each changed directory entry */
-	LIST_FOREACH_SAFE(dptr, &watch->dir.all, entries, dtmp) {
-
-		/* Skip files that have not changed */
-		if (dptr->mask == 0)
-			continue;
-
-		/* Add the event to the list of pending events */
-		pn_event_add(watch, dptr->mask, dptr->ent.d_name);
-
-		/* Remove the directory entry for a deleted file */
-		if (dptr->mask & PN_DELETE) {
-			LIST_REMOVE(dptr, entries);
-			free(dptr);
-		}
 	}
 
 	return 0;

@@ -31,6 +31,7 @@
 #include <string.h>
 #include <sys/param.h>
 #include <sys/types.h>
+#include <sys/signal.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -39,49 +40,31 @@
 #include "thread.h"
 #include "buffer.h"
 
-/* System-specific headers */
-#if defined(__linux__)
-# define HAVE_INOTIFY 1
-# include <sys/inotify.h>
-# include <sys/epoll.h>
-#elif defined(BSD)
-# define HAVE_KQUEUE 1
-# include <sys/event.h>
-#else
-# error "This library has not been ported to your operating system"
-#endif
-
 #define CTX_GET()      ((struct pnotify_ctx *) pthread_getspecific(CTX_KEY))
 #define CTX_SET(ctx)   (pthread_setspecific(CTX_KEY, ctx))
 extern pthread_key_t CTX_KEY;
 
+/* Defined in signal.c */
+extern struct watch *SIG_WATCH[NSIG + 1];
+
 /** An event */
-struct pnotify_event {
+struct event {
 
 	/** The watch that is interested in this event  */
-	struct pn_watch *watch;
-
-	/** The parent watch descriptor, when monitoring files
- 	    within a directory using kqueue(4). If no parent, this is zero.
-	*/
-	int 	  parent;
+	struct watch *watch;
 
 	/** One or more bitflags containing the event(s) that occurred */
 	int       mask;
 
-	/** The filename associated with a directory entry creation/deletion.
-		Only used when monitoring directories.
-	*/
-        char      name[NAME_MAX + 1];
-
-	TAILQ_ENTRY(pnotify_event) entries;
+	/** Pointers to the next and previous list elements */
+	TAILQ_ENTRY(event) entries;
 };
 
 /** pnotify context */
 struct pnotify_ctx {
 
 	/** A list of events that are ready to be delivered */
-	TAILQ_HEAD(, pnotify_event) event;
+	TAILQ_HEAD(, event) event;
 
 	/** A mutex used to synchronize access between threads */
 	pthread_mutex_t mutex;
@@ -97,100 +80,7 @@ struct pnotify_ctx {
 	sem_t event_count;
 };
 
-/** An entire directory that is under watch */
-struct directory {
-
-	/** The full pathname of the directory */
-	char    *path;
-	size_t   path_len;
-
-	/** A directory handle returned by opendir(3) */
-	DIR     *dirp;
-
-	/* All entries in the directory (struct dirent) */
-	LIST_HEAD(, dentry) all;
-};
-
-/** A directory entry list element */
-struct dentry {
-
-	/** The directory entry from readdir(3) */
-	struct dirent   ent;
-
-	/** A file descriptor used by kqueue(4) to monitor the entry */
-	int  fd;
-
-	/** The file status from stat(2) */
-	struct stat     st;
-
-	/** All event(s) that occurred on this file */
-	int mask;
-
-	/** Pointer to the next directory entry */
-        LIST_ENTRY(dentry) entries;
-};
-
-/** An internal watch entry */
-struct pn_watch {
-
-	/* ---- public fields accessible via pnotify_watch structure */
-
-	/** The type of resource to be watched */
-	enum pn_watch_type type;
-
-	/** Bitmask containing a union of all events to be monitored */
-	enum pn_event_bitmask mask;
-
-	/** The resource ID */
-	union pn_resource_id ident;
-
-	/** A callback to be invoked when a matching event occurs
-	 *
-	 * FIXME - update docs
-	 * Parameters passed to the function are:
-	 *     - the resource identifier from the watch structure
-	 *     - the mask of events which occurred
-	 *     - an opaque pointer to `arg' 
-	 */
-	struct pn_callback *cb;
-
-	/* ---- private fields accessible via pn_watch structure */
-
-	/** The context that owns the watch */
-	struct pnotify_ctx * ctx;
-
-	int             fd;	/**< The watched file descriptor */
-	int             wd;	/**< Unique 'watch descriptor' */
-	bool            is_dir;	/**< TRUE, if the file is a directory */
-
-	/* A list of directory entries (only used if is_dir is true) */
-	struct directory dir;
-
-	/* The parent watch descriptor, for watches that are
-	   automatically added on files within a monitored
-	   directory. If zero, there is no parent.
-	 */
-	int parent_wd;
-
-#if defined(BSD)
-
-	/* The associated kernel event structure */
-	struct kevent    kev;
-
-	/* The pathname of the directory (only for directories) */
-	//DEADWOOD: use ident.path instead of: char path[PATH_MAX + 1];
-
-#elif defined(__linux__)
-
-	struct epoll_event epoll_evt;
-
-#endif
-
-	/* Pointer to the next watch */
-	LIST_ENTRY(pn_watch) entries;
-};
-
-
+/* TODO - not used yet */
 /** An entry within a pnotify_buffer chain */
 struct pn_buffer {
 	char data[4096];
@@ -204,6 +94,7 @@ struct pn_buffer {
 	size_t pos;
 };
 
+/* TODO - not used yet */
 /** A linked list of buffers used to store the incoming and outgoing data 
  *  for a file descriptor.
  **/
@@ -235,30 +126,21 @@ struct pnotify_buffer {
 # define dprint_event(e) do { ; } while (0)
 #endif
 
-/** KLUDGE: The maximum number of watches that can exist at a single time */
-#define WATCH_MAX 1000
-
 /* Forward declarations for private functions */
 
-int pnotify_reap_signal(struct pnotify_event *, struct pnotify_ctx *);
-int sys_trap_signal(struct pnotify_ctx *, int signum);
-int pn_trap_signal(struct pnotify_ctx *, int signum);
 void * pn_signal_loop(void *);
 void * pn_timer_loop(void *);
-void pn_event_add(struct pn_watch *watch, int mask, const char *name);
-struct pn_watch * pn_get_watch_by_id(int wd);
+void pn_event_add(struct watch *watch, int mask);
 void pn_mask_signals();
 void pn_timer_init(void);
-int pn_add_timer(struct pn_watch *watch);
-int pn_rm_timer(struct pn_watch *watch);
-void pn_rm_watch(struct pn_watch *watch);
-int pn_call_function(struct pn_watch *watch);
+int pn_add_timer(struct watch *watch);
+int pn_rm_timer(struct watch *watch);
 
 /* vtable for system-specific functions */
 struct pnotify_vtable {
 	void (*init_once)(void);
-	int (*add_watch)(struct pn_watch *);
-	int (*rm_watch)(struct pn_watch *);
+	int (*add_watch)(struct watch *);
+	int (*rm_watch)(struct watch *);
 	void (*cleanup)();
 };
 extern const struct pnotify_vtable * const sys;
