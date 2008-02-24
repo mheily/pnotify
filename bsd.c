@@ -27,7 +27,7 @@
 #include "pnotify-internal.h"
 
 
-#if HAVE_KQUEUE
+#if defined(BSD)
 
 #include <fcntl.h>
 #include <sys/event.h>

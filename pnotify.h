@@ -19,16 +19,18 @@
 #ifndef _PNOTIFY_H
 #define _PNOTIFY_H
 
+/* The BSD macro is defined in sys/param.h */
+#if (defined(__unix__) || defined(unix)) && !defined(USG)
+#include <sys/param.h>
+#endif
 
 #include <sys/types.h>
 
 /* System-specific headers */
 #if defined(__linux__)
-# define HAVE_INOTIFY 1
 # include <sys/inotify.h>
 # include <sys/epoll.h>
-#elif defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__Darwin__)
-# define HAVE_KQUEUE 1
+#elif defined(BSD) 
 # include <sys/event.h>
 #else
 # error "This library has not been ported to your operating system"
@@ -40,20 +42,13 @@
  *
 */
 
-#include <dirent.h>
-#include <stdarg.h>
-#include <stdint.h>
-#include <limits.h>
-#include <sys/time.h>
-#include <stdarg.h>
-
 /* kqueue(4) in MacOS/X does not support NOTE_TRUNCATE */
 #ifndef NOTE_TRUNCATE
 # define NOTE_TRUNCATE 0
 #endif
 
 /* Opaque structures */
-struct pnotify_buffer;
+
 struct event;
 struct pnotify_ctx;
 
@@ -167,16 +162,17 @@ struct watch {
 	/** The context that receives the event */
 	struct pnotify_ctx *ctx;
 
-#if HAVE_KQUEUE
+#if defined(BSD)
 
 	/* The associated kernel event structure */
 	struct kevent    kev;
 
-	/* Each watched file must be opened first, this is the fd tha is used */
+	/* Each watched file must be opened first, this is the fd that is used */
 	int wfd;
 
-#elif HAVE_INOTIFY
+#elif defined(__linux__)
 
+	/* The associated kernel event structure */
 	struct epoll_event epoll_evt;
 
 	/** The watch descriptor returned by inotify */
@@ -198,14 +194,6 @@ struct watch {
   @return pointer to a new pnotify context, or NULL if an error occurred.
 */
 struct pnotify_ctx * pnotify_init();
-
-/**
-  Add a watch.
-
-  @param watch a watch structure
-  @return a unique watch descriptor if successful, or -1 if an error occurred.
-*/
-int pnotify_add_watch(struct watch *watch);
 
 
 /**

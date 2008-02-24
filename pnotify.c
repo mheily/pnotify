@@ -50,9 +50,9 @@ pthread_key_t CTX_KEY;
 
 
 /* Define the system-specific vtable.  */
-#if HAVE_KQUEUE
+#if defined(BSD)
 const struct pnotify_vtable * const sys = &BSD_VTABLE;
-#else
+#elif defined(__linux__)
 const struct pnotify_vtable * const sys = &LINUX_VTABLE;
 #endif
 
