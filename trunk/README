@@ -1,39 +1,38 @@
-
                                     pnotify
 
    pnotify is an event notification framework for monitoring files and
    directories. It is designed to be portable across different Unix-like
-   operating systems, and currently supports Linux and BSD. The
-   [1]pnotify API is very similar to the [2]inotify API under Linux.
-                    ___________________________________
+   operating systems, and currently supports Linux and BSD. The [1]pnotify
+   API is very similar to the [2]inotify API under Linux.
+                     ___________________________________
 
               [3]Download | [4]Documentation | [5]Mailing list
-                    ___________________________________
+                     ___________________________________
 
 Rationale
 
    Kernel-based filesystem event notification is a relatively new
-   phenonemon, and several different approaches have been taken by
-   various operating systems. Linux uses inotify, BSD uses kqueue, Apple
-   has kqueue and it's own Spotlight system calls, Solaris has FEM,
-   Windows has the NTFS Change Journal and the ReadDirectoryChangesW
-   function, and so forth.
+   phenonemon, and several different approaches have been taken by various
+   operating systems. Linux uses inotify, BSD uses kqueue, Apple has
+   kqueue and it's own Spotlight system calls, Solaris has FEM, Windows
+   has the NTFS Change Journal and the ReadDirectoryChangesW function, and
+   so forth.
 
    The goal of pnotify is to provide a simple, cross-platform API for
-   monitoring filesystem events. The library will conceal all of the
-   messy implementation-specific details from the user and help them to
-   write more portable programs.
+   monitoring filesystem events. The library will conceal all of the messy
+   implementation-specific details from the user and help them to write
+   more portable programs.
 
 History
 
-   pnotify was born out of an effort to port the inotify API from Linux
-   to BSD. This initial effort took the form of a userspace library that
-   would translate inotify requests into their kqueue(4) equivalent.
-   After some time, it became clear that kqueue was not sophisticated
-   enough to support all of the functionality of inotify. There was also
-   the problem of threadsafety; inotify relies on shared global data
-   structures, which is normal within the kernel but complicates the
-   design of a userspace library.
+   pnotify was born out of an effort to port the inotify API from Linux to
+   BSD. This initial effort took the form of a userspace library that
+   would translate inotify requests into their kqueue(4) equivalent. After
+   some time, it became clear that kqueue was not sophisticated enough to
+   support all of the functionality of inotify. There was also the problem
+   of threadsafety; inotify relies on shared global data structures, which
+   is normal within the kernel but complicates the design of a userspace
+   library.
 
    Eventually, it became clear that a new API was needed to address these
    portability and threadsafety issues. This new API became 'pnotify', to
@@ -62,13 +61,12 @@ Supported Platforms
 
 Usage
 
-   When you run './configure && make && make install', pnotify is built
-   as a shared library and installed under the /usr/local prefix.
+   When you run './configure && make && make install', pnotify is built as
+   a shared library and installed under the /usr/local prefix.
 
    Even though pnotify is built as a shared library by default, it is
-   easier for application developers to include pnotify.c and pnotify.h
-   in their source tree and not depend on the existence of a shared
-   library.
+   easier for application developers to include pnotify.c and pnotify.h in
+   their source tree and not depend on the existence of a shared library.
 
 Download
 
@@ -94,9 +92,9 @@ Documentation
 
 Mailing List
 
-   There is a mailing list for discussion about the pnotify library.
-   Click [13]here to sign up, post a question or comment, or browse
-   through the archives.
+   There is a mailing list for discussion about the pnotify library. Click
+   [13]here to sign up, post a question or comment, or browse through the
+   archives.
 
 Contact the Author
 
@@ -108,24 +106,24 @@ Related Links
      * [16]gamin - the modern FAM replacement. Part of the GNOME project.
      * [17]libevent - a library for building event-driven servers.
        Supports socket events, but not filesystem events.
-     _________________________________________________________________
+     __________________________________________________________________
 
    (C) 2007 Mark Heily.
 
 References
 
-   1. file://localhost/home/mark/pnotify/manpage.html
+   1. file://localhost/usr/home/mheily/proj/pnotify/manpage.html
    2. http://linux.die.net/man/7/inotify
-   3. file://localhost/home/mark/pnotify/index.html#download
-   4. file://localhost/home/mark/pnotify/index.html#docs
-   5. file://localhost/home/mark/pnotify/index.html#mlist
+   3. file://localhost/usr/home/mheily/proj/pnotify/index.html#download
+   4. file://localhost/usr/home/mheily/proj/pnotify/index.html#docs
+   5. file://localhost/usr/home/mheily/proj/pnotify/index.html#mlist
    6. http://code.google.com/p/pnotify/downloads/list
    7. http://pnotify.googlecode.com/svn/trunk/
-   8. file://localhost/home/mark/pnotify/manpage.html
-   9. file://localhost/home/mark/pnotify/manpage.ps
-  10. file://localhost/home/mark/pnotify/manpage.pdf
+   8. file://localhost/usr/home/mheily/proj/pnotify/manpage.html
+   9. file://localhost/usr/home/mheily/proj/pnotify/manpage.ps
+  10. file://localhost/usr/home/mheily/proj/pnotify/manpage.pdf
   11. http://pnotify.googlecode.com/svn/trunk/nio.h
-  12. file://localhost/home/mark/pnotify/doxygen/html/files.html
+  12. file://localhost/usr/home/mheily/proj/pnotify/doxygen/html/files.html
   13. http://groups.google.com/group/pnotify/topics
   14. mailto:devel@heily.com
   15. http://oss.sgi.com/projects/fam/
