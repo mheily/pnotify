@@ -21,6 +21,8 @@
  * Timer functions to support the PN_TIMEOUT event class
  */
 
+#include <sys/time.h>
+
 #include "pnotify.h"
 #include "pnotify-internal.h"
 #include "queue.h"
