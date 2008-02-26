@@ -81,6 +81,7 @@ pn_signal_loop(void * unused)
 		sigdelset(&signal_set, SIGALRM);
 		dprintf("sigwait..\n");
 		sigwait(&signal_set, &signum);
+		dprintf("got signal %d..\n", signum);
 
 		/* Determine if the signal is being watched */
 		watch = SIG_WATCH[signum];

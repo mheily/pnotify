@@ -96,7 +96,6 @@ linux_init_once(void)
 void
 linux_cleanup(void)
 {
-	(void) close(INOTIFY_FD);
 }
 
 
@@ -105,7 +104,6 @@ linux_add_watch(struct watch *watch)
 {
 	struct epoll_event *ev = &watch->epoll_evt;
 	int mask = watch->mask;
-	uint32_t        imask = 0;
 
 	switch (watch->type) {
 
@@ -141,33 +139,6 @@ linux_rm_watch(struct watch *watch)
 	return 0;
 }
 
-
-void
-linux_dump_inotify_event(struct inotify_event *iev)
-{
-	static const char *nam[] = {
-		"IN_ACCESS", "IN_MODIFY", "IN_ATTRIB", "IN_CLOSE_WRITE",
-		"IN_CLOSE_NOWRITE", "IN_OPEN", "IN_MOVED_FROM",
-		"IN_MOVED_TO", "IN_CREATE", "IN_DELETE", "IN_DELETE_SELF",
-		"IN_MOVE_SELF", "IN_UNMOUNT", "IN_Q_OVERFLOW", "IN_IGNORED",
-		"IN_ONLYDIR", "IN_DONT_FOLLOW", "IN_MASK_ADD", "IN_ISDIR",
-		"IN_ONESHOT", NULL };
-	static const int val[] = {
-		IN_ACCESS, IN_MODIFY, IN_ATTRIB, IN_CLOSE_WRITE,
-		IN_CLOSE_NOWRITE, IN_OPEN, IN_MOVED_FROM,
-		IN_MOVED_TO, IN_CREATE, IN_DELETE, IN_DELETE_SELF,
-		IN_MOVE_SELF, IN_UNMOUNT, IN_Q_OVERFLOW, IN_IGNORED,
-		IN_ONLYDIR, IN_DONT_FOLLOW, IN_MASK_ADD, IN_ISDIR,
-		IN_ONESHOT, 0 };
-	int i;
-
-	fprintf(stderr, "inotify event: wd=%d mask=", iev->wd);
-	for (i = 0; val[i] != 0; i++) {
-		if (iev->mask & val[i])
-			fprintf(stderr, "%s ", nam[i]);
-	}
-	fprintf(stderr, "\n");
-}
 
 const struct pnotify_vtable LINUX_VTABLE = {
 	.init_once = linux_init_once,
