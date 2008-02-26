@@ -232,39 +232,6 @@ retry:
 }
 
 
-int
-pnotify_print_event(struct event * evt)
-{
-	assert(evt);
-
-	return printf("event: fd=%d mask=(%s%s%s%s%s)\n",
-		      evt->watch->ident.fd,
-		      evt->mask & PN_ATTRIB ? "attrib," : "",
-		      evt->mask & PN_CREATE ? "create," : "",
-		      evt->mask & PN_DELETE ? "delete," : "",
-		      evt->mask & PN_MODIFY ? "modify," : "",
-		      evt->mask & PN_ERROR ? "error," : "");
-}
-
-
-void
-pnotify_dump(struct pnotify_ctx *ctx)
-{
-	struct event *evt;
-
-	mutex_lock(ctx);
-
-	printf("\npending events:\n");
-	STAILQ_FOREACH(evt, &ctx->event, entries) {
-		printf("\t");
-		(void) pnotify_print_event(evt);
-	}
-	printf("/* end: pending events */\n");
-
-	mutex_unlock(ctx);
-}
-
-
 void
 pnotify_free(struct pnotify_ctx *ctx)
 {
@@ -320,31 +287,16 @@ _watch_add(enum pn_watch_type wtype, int fd, const char *path, int mask, void (*
 	w->mask = mask;
 	w->cb = cb;
 	w->arg = arg;
-	if (wtype == WATCH_VNODE) {
-		if ((w->ident.path = strdup(path)) == NULL) {
-			free(w);
-			return NULL;
-		}
-	} else {
-		w->ident.fd = fd;
-	}
+	w->ident.fd = fd;
 
 	/* Add the watch */
 	if (pnotify_add_watch(w) != 0) {
-		if (wtype == WATCH_VNODE)
-			free(w->ident.path);
 		free(w);
 		return NULL;
 	}
 
 	return (w);
 
-}
-
-struct watch *
-watch_vnode(const char *path, int mask, void (*cb)(), void *arg)
-{
-	return _watch_add(WATCH_VNODE, 0, path, mask, cb, arg);
 }
 
 
@@ -382,12 +334,6 @@ event_dispatch()
 		if (evt.watch->cb == NULL) {
 			dprintf("ERROR: Cannot dispatch an event without a callback\n");
 			continue;
-		}
-			
-		if (evt.watch->type == WATCH_VNODE) {
-			//FIXME: need to copy path to caller
-			//*(evt->watch->cb)(evt->, 
-			err(1, "XXX-FIXME");
 		} else if (evt.watch->type == WATCH_TIMER) {
 			 evt.watch->cb(evt.mask, evt.watch->arg);
 		} else {

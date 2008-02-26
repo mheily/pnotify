@@ -58,24 +58,6 @@ bsd_handle_fd_event(struct watch *watch, struct kevent *kev)
 }
 
 
-static void
-bsd_handle_vnode_event(struct watch *watch, struct kevent *kev)
-{
-	int mask = 0;
-
-	/* Convert the kqueue(4) flags to pnotify_event flags */
-	if ((kev->fflags & NOTE_WRITE) || (kev->fflags & NOTE_TRUNCATE) || (kev->flags & NOTE_EXTEND))
-		mask |= PN_MODIFY;
-	if (kev->fflags & NOTE_ATTRIB)
-		mask |= PN_ATTRIB;
-	if (kev->fflags & NOTE_DELETE)
-		mask |= PN_DELETE;
-
-	/* Add the event to the list of pending events */
-	pn_event_add(watch, mask);
-}
-
-
 void *
 bsd_kqueue_loop()
 {
@@ -101,9 +83,6 @@ bsd_kqueue_loop()
 		switch (watch->type) {
 			case WATCH_FD:
 				bsd_handle_fd_event(watch, &kev);
-				break;
-			case WATCH_VNODE:
-				bsd_handle_vnode_event(watch, &kev);
 				break;
 			default:
 				errx(1, "invalid watch type %d", watch->type);
@@ -181,7 +160,6 @@ int
 bsd_add_watch(struct watch *watch)
 {
 	struct kevent *kev = &watch->kev;
-	struct stat st;
 	int mask = watch->mask;
 	int filt = 0;
 
@@ -196,34 +174,6 @@ bsd_add_watch(struct watch *watch)
 			if (filt == 0) 
 				errx(1, "invalid mask");
 			EV_SET(kev, watch->ident.fd, filt, EV_ADD | EV_CLEAR, 0, 0, watch);
-			break;
-
-		case WATCH_VNODE:
-
-			/* Open the file */
-			if ((watch->wfd = open(watch->ident.path, O_RDONLY)) < 0) {
-				warn("opening path `%s' failed", watch->ident.path);
-				return -1;
-			}
-			if (fstat(watch->wfd, &st) != 0) {
-				close(watch->wfd);
-				return -1;
-			}
-			if (! S_ISREG(st.st_mode)) {
-				warn("cannot watch a non-regular file");
-				close(watch->wfd);
-				return -1;
-			}	
-
-			EV_SET(kev, watch->wfd, EVFILT_VNODE, EV_ADD | EV_CLEAR, 0, 0, watch);
-			if (mask & PN_ATTRIB)
-				kev->fflags |= NOTE_ATTRIB;
-			if (mask & PN_CREATE)
-				kev->fflags |= NOTE_WRITE;
-			if (mask & PN_DELETE)
-				kev->fflags |= NOTE_DELETE | NOTE_WRITE;
-			if (mask & PN_MODIFY)
-				kev->fflags |= NOTE_WRITE | NOTE_EXTEND | NOTE_TRUNCATE;
 			break;
 
 		default:
