@@ -28,7 +28,6 @@
 
 /* System-specific headers */
 #if defined(__linux__)
-# include <sys/inotify.h>
 # include <sys/epoll.h>
 #elif defined(BSD) 
 # include <sys/event.h>
@@ -167,9 +166,6 @@ struct watch {
 
 	/* The associated kernel event structure */
 	struct epoll_event epoll_evt;
-
-	/** The watch descriptor returned by inotify */
-	int wd;
 
 #endif
 

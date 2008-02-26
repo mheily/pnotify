@@ -28,102 +28,9 @@
 
 #if defined(__linux__)
 
-#define USE_INOTIFY 0 
-/* NOTE: 
-
-   inotify is too recent to rely on; Sarge doesn't have it.
-
-     http://www.mail-archive.com/debian-glibc@lists.debian.org/msg32858.html
-*/
 #include <sys/epoll.h>
-#include <linux/inotify.h>
 
-static int INOTIFY_FD = -1;
 static int EPOLL_FD = -1;
-
-void linux_dump_inotify_event(struct inotify_event *iev);
-
-void *
-linux_inotify_loop(void * unused)
-{
-	struct watch *watch, *tmp;
-	struct inotify_event *iev, *endp;
-	ssize_t         bytes;
-	char            buf[4096];
-	int             mask;
-
-	/* Loop forever waiting for events */
-	for (;;) {
-
-		/* 
-		 * Wait for an event and read it into a buffer.
-		 * This may block, so release the mutex.
-		 */
-		bytes = read(INOTIFY_FD, &buf, sizeof(buf));
-		if (bytes <= 0) {
-			if (errno == EINTR)
-				continue;
-			err(1, "read(2)");
-		}
-
-		/* Compute the beginning and end of the event list */
-		iev = (struct inotify_event *) & buf;
-		endp = iev + bytes;
-
-		/* Process each pending event */
-		while (iev < endp) {
-
-			if (iev->wd == 0)
-				break;
-
-			/* We don't care about IN_IGNORED events */
-			if (iev->mask & IN_IGNORED)
-				goto next_event;
-				
-			/* Find the matching watch structure */
-			/* TODO: Use a lookup table to make this O(1) instead of O(N) */
-			pthread_mutex_lock(&WATCH_MUTEX);
-			LIST_FOREACH_SAFE(watch, &WATCH, entries, tmp) {
-				if (watch->wd == iev->wd) {
-					tmp = watch;
-					break;
-				}
-			}
-			pthread_mutex_unlock(&WATCH_MUTEX);
-
-			if (tmp != watch) {
-				warnx("watch # %d not found\n", iev->wd);	
-				linux_dump_inotify_event(iev);
-				continue;
-			}
-
-			mask = 0;
-			/* Compute the event bitmask */
-			if (iev->mask & IN_ATTRIB)
-				mask |= PN_ATTRIB;
-			if (iev->mask & IN_MODIFY)
-				mask |= PN_MODIFY;
-			if (iev->mask & IN_CREATE)
-				mask |= PN_CREATE;
-			if (iev->mask & IN_DELETE)
-				mask |= PN_DELETE;
-			if (iev->mask & IN_DELETE_SELF) {
-				mask |= PN_DELETE;
-			}
-
-			/* Add the event to the list of pending events */
-			pn_event_add(watch, mask);
-
-next_event:
-			/* Go to the next event */
-			iev += sizeof(*iev) + iev->len;
-		}
-	}
-
-	close(INOTIFY_FD);
-	return NULL;
-}
-
 
 void *
 linux_epoll_loop(void * unused)
@@ -174,17 +81,6 @@ linux_init_once(void)
 {
 	pthread_t tid;
 
-#if USE_INOTIFY
-	/* Create an inotify descriptor */
-	if ((INOTIFY_FD = inotify_init()) < 0)
-		err(1, "inotify_init(2)");
-
-        /* Create a dedicated inotify thread */
-	if (pthread_create( &tid, NULL, linux_inotify_loop, NULL ) != 0)
-		errx(1, "pthread_create(3) failed");
-
-#endif 
-
 	/* Create an epoll descriptor */
 	if ((EPOLL_FD = epoll_create(1000)) < 0)
 		err(1, "epoll_create(2)");
@@ -230,34 +126,6 @@ linux_add_watch(struct watch *watch)
 			dprintf("added epoll watch for fd #%d", watch->ident.fd);
 			break;
 
-		case WATCH_VNODE:
-			/* Generate the mask */
-			if (mask & PN_ATTRIB)
-				imask |= IN_ATTRIB;
-			if (mask & PN_CREATE)
-				imask |= IN_CREATE;
-			if (mask & PN_DELETE)
-				imask |= IN_DELETE | IN_DELETE_SELF;
-			if (mask & PN_MODIFY)
-				imask |= IN_MODIFY;
-			if (mask & PN_ONESHOT)
-				imask |= IN_ONESHOT;
-
-#if USE_INOTIFY
-			/* Add the event to the kernel event queue */
-			watch->wd = inotify_add_watch(INOTIFY_FD, watch->ident.path, imask);
-			if (watch->wd < 0) {
-				warnx("inotify_add_watch(2) failed (fn=`%s')", 
-					watch->ident.path);
-				return -1;
-			}
-#else
-			warn("inotify is not supported");
-			return -1;
-#endif
-
-			break;
-
 		default:
 			/* The default action is to do nothing. */
 			break;
@@ -269,13 +137,7 @@ linux_add_watch(struct watch *watch)
 int
 linux_rm_watch(struct watch *watch)
 {
-#if USE_INOTIFY
-	if (inotify_rm_watch(INOTIFY_FD, watch->wd) < 0) {
-		perror("inotify_rm_watch(2)");
-		return -1;
-	}
-#endif
-
+	/* XXX-FIXME remove from epoll set */
 	return 0;
 }
 
