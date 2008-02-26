@@ -22,8 +22,7 @@ noinst_HEADERS=		queue.h pnotify-internal.h thread.h
 dist_man3_MANS=		pnotify.3
 EXTRA_DIST=		index.html Doxyfile
 
-libpnotify_la_SOURCES=	pnotify.c signal.c timer.c buffer.c \
-                        bsd.c linux.c
+libpnotify_la_SOURCES=	pnotify.c signal.c timer.c bsd.c linux.c
 libpnotify_la_CFLAGS=	-O0 -g -Wall -D_REENTRANT -DPNOTIFY_DEBUG=1 
 libpnotify_la_LDFLAGS=  -lpthread
 
