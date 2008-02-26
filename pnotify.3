@@ -16,8 +16,6 @@
 .Ft "struct watch *"
 .Fn watch_signal "int signum" "void (*cb)()" "void *arg"
 .Ft "struct watch *"
-.Fn watch_vnode "const char *path" "int mask" "void (*cb)()" "void *arg"
-.Ft "struct watch *"
 .Fn watch_fd "int fd" "int mask" "void (*cb)()" "void *arg"
 .Ft "struct watch *"
 .Fn "watch_timer" "int interval" "int mask" "void (*cb)()" "void *arg"
@@ -44,14 +42,9 @@ and destroys all watches and pending events.
 The mask parameter is composed of one
 or more bitflags from the following list of events:
 .Bl -column "Flag" "Meaning" -offset indent
-.It Sy PN_ATTRIB Ta "The attributes of a file have been modified."
 .It Sy PN_CLOSE Ta "A file descriptor was closed by the remote end."
-.It Sy PN_CREATE Ta "A file was created in a watched directory."
-.It Sy PN_DELETE Ta "The file was deleted."
 .It Sy PN_ERROR Ta "An error occurred in the kernel event queue."
-.It Sy PN_MODIFY Ta "The contents of a file have been modified."
 .It Sy PN_READ Ta "Data can be read from a file descriptor without blocking."
-.It Sy PN_RETURN Ta "An asynchronous function call has completed."
 .It Sy PN_SIGNAL Ta "A signal was delivered to the process."
 .It Sy PN_TIMEOUT Ta "A user-defined time interval has elapsed."
 .It Sy PN_WRITE Ta "Data can be written to a file descriptor without blocking."
@@ -72,9 +65,6 @@ The following functions are used to create watches:
 .Fn watch_signal
 causes an event to be generated when a signal is received by the process. The signal
 is otherwise blocked, and will not cause a signal handler to be run. 
-.Pp
-.Fn watch_vnode
-causes an event to be generated when a file or directory is changed. 
 .Pp
 .Fn watch_fd
 causes an event to be generated when an open file descriptor is ready for reading,
@@ -114,22 +104,9 @@ Functions which create watches return pointers to the newly created
 watch structure, or NULL if an error occurred.
 All other functions return zero if successful, or -1 if an error occurs.
 .Sh EXAMPLES
-The following example creates a watch on a file named /tmp/test.
+TODO....
 .Bd -literal
-struct event evt;
-
-pnotify_init();
-watch_vnode("/tmp/test", PN_CREATE | PN_DELETE, NULL, NULL);
-while (event_wait(&evt) == 0) {
-	if (evt.mask & PN_MODIFY) 
-		printf("file modified");
-	if (evt.mask & PN_DELETE) 
-		printf("file deleted");
-	if (evt.mask & PN_ERROR) {
-		printf("an error occurred");
-		break;
-	}
-}
+   { example here ... }
 .Ed
 .Pp
 The next example shows how to use the
@@ -165,10 +142,7 @@ before using any other library functions. Each thread has its own
 event list. 
 .Sh SEE ALSO
 .Xr kqueue 4
-.Xr inotify 7
 .\" .Sh STANDARDS
-.Sh HISTORY
-pnotify was first released on July 25th, 2007 with support for inotify and kqueue.
 .Sh AUTHORS
 Mark Heily <devel@heily.com>
 .\" .Sh CAVEATS

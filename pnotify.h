@@ -46,9 +46,6 @@ struct pnotify_ctx;
 
 /** The type of resource to be watched */
 enum pn_watch_type {
-	/** A vnode in the filesystem */
-	WATCH_VNODE = 0,
-
 	/** An open file descriptor */
 	WATCH_FD,
 
@@ -81,14 +78,6 @@ union pn_resource_id {
 	 * When the interval elapses, a PN_TIMER event is created.
 	 */
 	int interval;
-
-	/**
-	 * A file or directory
-	 *
-	 * When changes are made to the file/directory,
-	 * various events are generated.
-	 */
-	char *path;
 };
 
 
@@ -98,32 +87,20 @@ enum pn_event_bitmask {
 	/** Use the default settings when creating a watch */
 	PN_DEFAULT              = 0,
 
-	/** The attributes of a file have been modified */
-	PN_ATTRIB 		= 0x1 << 0,
-
-	/** A file was created in a watched directory */
-	PN_CREATE		= 0x1 << 1,
-
-	/** A file was deleted from a watched directory */
-	PN_DELETE		= 0x1 << 2,
-
-	/** The contents of a file have changed */
-	PN_MODIFY		= 0x1 << 3,
-
 	/** Data is ready to be read from a file descriptor */
-	PN_READ                 = 0x1 << 4,
+	PN_READ                 = 0x1 << 1,
 
 	/** Data is ready to be written to a file descriptor */
-	PN_WRITE                = 0x1 << 5,
+	PN_WRITE                = 0x1 << 2,
 
 	/** A socket or pipe descriptor was closed by the remote end */
-	PN_CLOSE                = 0x1 << 6,
+	PN_CLOSE                = 0x1 << 3,
 
 	/** A timer expired */
-	PN_TIMEOUT              = 0x1 << 7,  
+	PN_TIMEOUT              = 0x1 << 4,  
 
 	/** A signal was received */
-	PN_SIGNAL               = 0x1 << 8,  
+	PN_SIGNAL               = 0x1 << 5,  
 
 	/** Delete the watch after a matching event occurs */
 	PN_ONESHOT		= 0x1 << 30,
@@ -229,18 +206,6 @@ int event_wait(struct event *);
 int event_dispatch();
 
 /**
- Print debugging information about an event to standard output.
- @param evt an event to be printed
-*/
-int pnotify_print_event(struct event *);
-
-
-/**
- Print the context to standard output.
-*/
-void pnotify_dump(struct pnotify_ctx *);
-
-/**
   Free all resources associated with an event queue.
 
   All internal data structures will be freed. 
@@ -259,14 +224,6 @@ void pnotify_free(struct pnotify_ctx *ctx);
  * @return a watch descriptor, or -1 if an error occurred
  */ 
 struct watch * watch_signal(int signum, void (*cb)(), void *arg);
-
-/** Watch for changes to a vnode 
- *
- * @param path the path to a file or directory to be monitored
- * @param mask a bitmask of events to monitor
- * @return a watch descriptor, or -1 if an error occurred
- */ 
-struct watch * watch_vnode(const char *path, int mask, void (*cb)(), void *arg);
 
 /** Watch for changes to a file descriptor */
 struct watch * watch_fd(int fd, int mask, void (*cb)(), void *arg); 
