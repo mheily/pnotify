@@ -31,8 +31,8 @@
 
 struct pn_timer {
 
-	/** The current amount of time left until the timer expires (in seconds) */
-	int remaining;
+	/** The time after which the timer expires */
+	time_t expires;
 
 	/** The watch associated with the timer event */
 	struct watch *watch;
@@ -51,39 +51,6 @@ size_t TIMER_INTERVAL = 1;
 /** A mutex to protect all global TIMER variables */
 pthread_mutex_t TIMER_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 
-/** Cause a SIGALRM signal to be generated every TIMER_INTERVAL */
-static void
-timer_enable()
-{
-	struct itimerval itv;
-
-	itv.it_value.tv_sec = TIMER_INTERVAL;
-	itv.it_value.tv_usec = 0;
-	itv.it_interval.tv_sec = TIMER_INTERVAL;
-	itv.it_interval.tv_usec = 0;
-
-	if (setitimer(ITIMER_REAL, &itv, NULL) != 0) 
-		err(1, "setitimer(2)");
-
-	dprintf("timers enabled..\n");
-}
-
-
-/** Disable the periodic alarm timer */
-static void
-timer_disable()
-{
-	struct itimerval itv;
-
-	memset(&itv, 0, sizeof(itv));
-
-	if (setitimer(ITIMER_REAL, &itv, NULL) != 0) 
-		err(1, "setitimer(2)");
-
-	dprintf("timers disabled..\n");
-}
-
-
 int
 pn_add_timer(struct watch *watch)
 {
@@ -94,14 +61,14 @@ pn_add_timer(struct watch *watch)
 		warn("malloc(3)");
 		return -1;
 	}
-	timer->remaining = watch->ident.interval;
+	timer->expires = time(NULL) + watch->ident.interval;
 	timer->watch = watch;
 
 	pthread_mutex_lock(&TIMER_MUTEX);
 
 	/* Enable the periodic timer if this is the first entry */
-	if (LIST_EMPTY(&TIMER))
-		timer_enable();
+	//if (LIST_EMPTY(&TIMER))
+	//	timer_enable();
 
 	/* Add the timer to the list */
 	LIST_INSERT_HEAD(&TIMER, timer, entries);
@@ -120,8 +87,8 @@ pn_rm_timer(struct watch *watch)
 	pthread_mutex_lock(&TIMER_MUTEX);
 
 	/* Disable the periodic timer if there are no more timers */
-	if (LIST_EMPTY(&TIMER)) 
-		timer_disable();
+//	if (LIST_EMPTY(&TIMER)) 
+//		timer_disable();
 
 	/* Remove the timer struct */
 	LIST_FOREACH_SAFE(timer, &TIMER, entries, tmp) {
@@ -148,30 +115,25 @@ void *
 pn_timer_loop(void *unused)
 {
 	struct pn_timer *timer, *tmp;
-	sigset_t signal_set;
-	int signum;
+	time_t now;
 
-	/* Loop forever waiting for an alarm signal */
+	/* Loop forever marking time */
 	for (;;) {
 
 		/* Wait for SIGALRM */
-		sigemptyset(&signal_set);
-		sigaddset(&signal_set, SIGALRM);
-		sigwait(&signal_set, &signum);
-		dprintf("got SIGALRM..\n");
+		sleep(TIMER_INTERVAL);
+		now = time(NULL);
+		dprintf("checking timer..\n");
 		
-		/* Reduce the time remaining on all timers */
+		/* Check the time remaining on all timers */
 		pthread_mutex_lock(&TIMER_MUTEX);
 		LIST_FOREACH_SAFE(timer, &TIMER, entries, tmp) {
 
 			/* If the timer has expired, generate an event ... */
-			if (TIMER_INTERVAL > timer->remaining) {
+			if (now > timer->expires) {
 
 				/* Add the event to an event queue */
 				pn_event_add(timer->watch, PN_TIMEOUT);
-
-				/* Reset the timer to it's initial value */
-				timer->remaining = timer->watch->ident.interval;
 
 				/* Remove the timer if ONESHOT is requested */
 				if (timer->watch->mask & PN_ONESHOT) {
@@ -184,15 +146,14 @@ pn_timer_loop(void *unused)
 					free(timer);
 
 					/* Disable the periodic timer if there are no more timers */
-					if (LIST_EMPTY(&TIMER)) 
-						timer_disable();
+					//if (LIST_EMPTY(&TIMER)) 
+					//	timer_disable();
 
+				} else {
+					/* Reset the timer to it's initial value */
+					timer->expires = now + timer->watch->ident.interval;
 				}
-			}
 
-			/* Otherwise, decrease the timer value */
-			else {
-				timer->remaining -= TIMER_INTERVAL;
 			}
 		}
 		pthread_mutex_unlock(&TIMER_MUTEX);
