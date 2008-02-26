@@ -38,7 +38,6 @@
 #include "pnotify.h"
 #include "queue.h"
 #include "thread.h"
-#include "buffer.h"
 
 /* kqueue(4) in MacOS/X does not support NOTE_TRUNCATE */
 #ifndef NOTE_TRUNCATE
