@@ -160,32 +160,15 @@ int
 bsd_add_watch(struct watch *watch)
 {
 	struct kevent *kev = &watch->kev;
-	int mask = watch->mask;
-	int filt = 0;
 
 	/* Create and populate a kevent structure */
-	switch (watch->type) {
-
-		case WATCH_FD:
-			if (mask & PN_READ)
-				filt = EVFILT_READ;
-			if (mask & PN_WRITE)
-				filt = EVFILT_WRITE;
-			if (filt == 0) 
-				errx(1, "invalid mask");
-			EV_SET(kev, watch->ident.fd, filt, EV_ADD | EV_CLEAR, 0, 0, watch);
-			break;
-
-		default:
+	if (watch->type == WATCH_FD) {
+			EV_SET(kev, watch->ident.fd, 
+					EVFILT_READ | EVFILT_WRITE, 
+					EV_ONESHOT | EV_ADD | EV_CLEAR, 0, 0, watch);
+	} else {
 			return 0;
-			break;
 	}
-
-	/* Set the 'oneshot' flag */
-	if (mask & PN_ONESHOT)
-		kev->flags |= EV_ONESHOT;
-
-	bsd_dump_kevent(kev);
 
 	/* Add the kevent to the kernel event queue */
 	if (kevent(KQUEUE_FD, kev, 1, NULL, 0, NULL) < 0) {
