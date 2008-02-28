@@ -123,7 +123,6 @@ void * pn_signal_loop(void *);
 void * pn_timer_loop(void *);
 void pn_event_add(struct watch *watch, int mask);
 void pn_mask_signals();
-void pn_timer_init(void);
 int pn_add_timer(struct watch *watch);
 int pn_rm_timer(struct watch *watch);
 

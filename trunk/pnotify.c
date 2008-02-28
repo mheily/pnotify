@@ -48,7 +48,6 @@
  */
 pthread_key_t CTX_KEY;
 
-
 /* Define the system-specific vtable.  */
 #if defined(BSD)
 const struct pnotify_vtable * const sys = &BSD_VTABLE;
@@ -60,8 +59,15 @@ const struct pnotify_vtable * const sys = &LINUX_VTABLE;
 LIST_HEAD(pnwatchhead, watch) WATCH;
 pthread_mutex_t WATCH_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 
+/* Defined in timer.c */
+extern LIST_HEAD(, pn_timer) TIMER;
 
-void
+/* Forward declarations */
+static void pnotify_free(struct pnotify_ctx *ctx);
+
+
+
+static void
 pnotify_init_once(void)
 {
 	pthread_t tid;
@@ -83,22 +89,18 @@ pnotify_init_once(void)
 
 	/* Initialize lists */
 	LIST_INIT(&WATCH);
-	pn_timer_init();
+	LIST_INIT(&TIMER);
 
 	/* Perform system-specific initialization */
 	sys->init_once();
 }
 
-/* 
- * FIXME: 
- * need to call free() and pthread_mutex_destroy() in
- * the error handing paths.
- */
-struct pnotify_ctx *
-pnotify_init()
+
+void
+pnotify_init(void)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
-	struct pnotify_ctx *ctx;
+	struct pnotify_ctx *ctx = NULL;
 
 	/* Perform one-time initialization */
 	pthread_once(&once, pnotify_init_once);
@@ -106,30 +108,33 @@ pnotify_init()
 	/* Allocate a new context structure */
 	if ((ctx = calloc(1, sizeof(*ctx))) == NULL) {
 		warn("calloc(3) failed");
-		return NULL;
+		goto err1;
 	}
+	STAILQ_INIT(&ctx->event);
 
 	/* Initialize the mutex */
 	if (pthread_mutex_init(&ctx->mutex, NULL) != 0) {
 		warn("pthread_mutex_init(3) failed");
-		return NULL;
+		goto err1;
 	}
 
 	/* Initialize the counting semaphore */
 	if (sem_init(&ctx->event_count, 0, 0) != 0) {
 		warn("sem_init(3) failed");
-		return NULL;
+		return;
 	}
 		
-	STAILQ_INIT(&ctx->event);
-
 	/* Set the global per-thread context variable */
 	CTX_SET(ctx);
 
 	/* Push the cleanup routine on the stack */
-	//FIXME: macro error: pthread_cleanup_push(pnotify_free, ctx);
+	pthread_cleanup_push((void (*)(void *)) pnotify_free, ctx);
 
-	return ctx;
+	return;
+
+err1:
+	(void) pthread_mutex_destroy(&ctx->mutex);
+	free(ctx);
 }
 
 
@@ -164,8 +169,6 @@ pnotify_add_watch(struct watch *watch)
 	pthread_mutex_lock(&WATCH_MUTEX);
 	LIST_INSERT_HEAD(&WATCH, watch, entries);
 	pthread_mutex_unlock(&WATCH_MUTEX);
-
-	dprintf("added watch: mask=%d\n", watch->mask);
 
 	return 0;
 }
@@ -232,7 +235,7 @@ retry:
 }
 
 
-void
+static void
 pnotify_free(struct pnotify_ctx *ctx)
 {
 	struct event *evt, *nxt;
@@ -276,7 +279,7 @@ pnotify_free(struct pnotify_ctx *ctx)
 
 
 static struct watch *
-_watch_add(enum pn_watch_type wtype, int fd, const char *path, int mask, void (*cb)(), void *arg)
+_watch_add(enum pn_watch_type wtype, int fd, const char *path, void (*cb)(), void *arg)
 {
 	struct watch *w;
 
@@ -284,7 +287,6 @@ _watch_add(enum pn_watch_type wtype, int fd, const char *path, int mask, void (*
 	if ((w = calloc(1, sizeof(*w))) == NULL) 
 		return NULL;
 	w->type = wtype;
-	w->mask = mask;
 	w->cb = cb;
 	w->arg = arg;
 	w->ident.fd = fd;
@@ -301,46 +303,45 @@ _watch_add(enum pn_watch_type wtype, int fd, const char *path, int mask, void (*
 
 
 struct watch *
-watch_fd(int fd, int mask, void (*cb)(), void *arg)
+watch_fd(int fd, void (*cb)(int, int, void *), void *arg)
 {
-	return _watch_add(WATCH_FD, fd, NULL, mask, cb, arg);
+	return _watch_add(WATCH_FD, fd, NULL, cb, arg);
 }
 
 
 struct watch *
-watch_timer(int interval, int mask, void (*cb)(), void *arg)
+watch_timer(int interval, void (*cb)(void *), void *arg)
 {
-	return _watch_add(WATCH_TIMER, interval, NULL, mask, cb, arg);
+	return _watch_add(WATCH_TIMER, interval, NULL, cb, arg);
 }
 
 struct watch *
-watch_signal(int signum, void (*cb)(), void *arg)
+watch_signal(int signum, void (*cb)(int, void *), void *arg)
 {
-	return _watch_add(WATCH_SIGNAL, signum, NULL, PN_SIGNAL, cb, arg);
+	return _watch_add(WATCH_SIGNAL, signum, NULL, cb, arg);
 }
 
-int
-event_dispatch()
+void
+event_dispatch(void)
 {
 	struct event evt;
 
 	for (;;) {
 		/* Wait for an event */
 		if (event_wait(&evt) != 0)
-			return -1;
+			abort();
 
 		/* Ignore events that have no callback defined */
 		/* FIXME - this sounds like a bad idea... maybe crash instead */
 		if (evt.watch->cb == NULL) {
 			dprintf("ERROR: Cannot dispatch an event without a callback\n");
-			continue;
+			abort();
 		} else if (evt.watch->type == WATCH_TIMER) {
 			 evt.watch->cb(evt.mask, evt.watch->arg);
 		} else {
 			 evt.watch->cb(evt.watch->ident.fd, evt.mask, evt.watch->arg);
 		}
 	}
-	return 0;
 }
 
 

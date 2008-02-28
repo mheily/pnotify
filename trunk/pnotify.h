@@ -99,12 +99,6 @@ enum pn_event_bitmask {
 	/** A timer expired */
 	PN_TIMEOUT              = 0x1 << 4,  
 
-	/** A signal was received */
-	PN_SIGNAL               = 0x1 << 5,  
-
-	/** Delete the watch after a matching event occurs */
-	PN_ONESHOT		= 0x1 << 30,
-
 	/** An error condition in the underlying kernel event queue */
 	PN_ERROR		= 0x1 << 31,
 
@@ -117,9 +111,6 @@ struct watch {
 
 	/** The type of resource to be watched */
 	enum pn_watch_type type;
-
-	/** Bitmask containing a union of all events to be monitored */
-	enum pn_event_bitmask mask;
 
 	/** The resource ID */
 	union pn_resource_id ident;
@@ -175,10 +166,8 @@ struct event {
 
   Before adding watches, the queue must be initialized via
   a call to pnotify_init(). 
-
-  @return pointer to a new pnotify context, or NULL if an error occurred.
 */
-struct pnotify_ctx * pnotify_init();
+void pnotify_init(void);
 
 
 /**
@@ -196,26 +185,19 @@ int watch_cancel(struct watch *watch);
   @param evt an event structure that will store the result
   @return 0 if successful, or non-zero if an error occurred.
 */
-int event_wait(struct event *);
+int event_wait(struct event *evt);
+
 
 /**
  * Wait for events and dispatch callbacks.
  *
  * @return -1 if an error occurs, otherwise the function does not return
 */
-int event_dispatch();
+void event_dispatch(void);
 
-/**
-  Free all resources associated with an event queue.
 
-  All internal data structures will be freed. 
-
-  @param ctx a context returned by pnotify_init() or NULL for the current context
-  @return 0 if successful, or non-zero if an error occurred.
-*/
-void pnotify_free(struct pnotify_ctx *ctx);
-
-/** Trap a specific signal and generate an event when it is received.
+/** 
+ * Trap a specific signal and generate an event when it is received.
  *
  * When a signal is trapped, it is no longer delivered to the program
  * and is converted into an event instead.
@@ -223,20 +205,15 @@ void pnotify_free(struct pnotify_ctx *ctx);
  * @param signum the signal to be trapped
  * @return a watch descriptor, or -1 if an error occurred
  */ 
-struct watch * watch_signal(int signum, void (*cb)(), void *arg);
+struct watch * watch_signal(int signum, void (*cb)(int, void *), void *arg);
 
 /** Watch for changes to a file descriptor */
-struct watch * watch_fd(int fd, int mask, void (*cb)(), void *arg); 
+struct watch * watch_fd(int fd, void (*cb)(int, int, void *), void *arg); 
 
 /** Set a timer to fire after specific number of seconds 
  *
- * If the mask is set to PN_ONESHOT, the timer will be automatically
- * deleted after one occurrance. If the mask is PN_DEFAULT,
- * the timer will repeat forever.
- *
- * @param interval the number of seconds between timer events
- * @param mask either PN_DEFAULT or PN_ONESHOT
+ * @param interval the minimum number of seconds that are to elapse
  */
-struct watch * watch_timer(int interval, int mask, void (*cb)(), void *arg);
+struct watch * watch_timer(int interval, void (*cb)(void *), void *arg);
 
 #endif /* _PNOTIFY_H */

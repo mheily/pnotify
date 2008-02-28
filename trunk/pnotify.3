@@ -9,21 +9,19 @@
 .Sh SYNOPSIS
 .In pnotify.h
 .Pp
-.Ft int
-.Fn pnotify_init
 .Ft void
-.Fn pnotify_free
+.Fn pnotify_init
 .Ft "struct watch *"
-.Fn watch_signal "int signum" "void (*cb)()" "void *arg"
+.Fn watch_signal "int signum" "void (*cb)(int, void *)" "void *arg"
 .Ft "struct watch *"
-.Fn watch_fd "int fd" "int mask" "void (*cb)()" "void *arg"
+.Fn watch_fd "int fd" "void (*cb)(int, int, void *)" "void *arg"
 .Ft "struct watch *"
-.Fn "watch_timer" "int interval" "int mask" "void (*cb)()" "void *arg"
+.Fn "watch_timer" "time_t interval" "void (*cb)(void *)" "void *arg"
 .Ft "struct watch *"
 .Fn watch_cancel "struct watch *w"
 .Ft int
 .Fn event_wait "struct event *evt"
-.Ft int
+.Ft void
 .Fn event_dispatch
 .Pp
 .Sh DESCRIPTION
@@ -32,11 +30,8 @@ The
 library provides a portable event notification framework.
 .Pp
 .Fn pnotify_init
-initializes the event queue, and must be called before any of the other pnotify functions.
-.Fn pnotify_free
-releases all of the memory and resources used by 
-.Nm
-and destroys all watches and pending events.
+initializes the event queue, and must be called before any of the other pnotify functions. The event
+queue will be automatically destroyed when the thread exits.
 .Pp
 .Sh EVENTS
 The mask parameter is composed of one
@@ -44,15 +39,9 @@ or more bitflags from the following list of events:
 .Bl -column "Flag" "Meaning" -offset indent
 .It Sy PN_CLOSE Ta "A file descriptor was closed by the remote end."
 .It Sy PN_ERROR Ta "An error occurred in the kernel event queue."
-.It Sy PN_READ Ta "Data can be read from a file descriptor without blocking."
-.It Sy PN_SIGNAL Ta "A signal was delivered to the process."
+.It Sy PN_READ\   Ta "Data can be read from a file descriptor without blocking."
 .It Sy PN_TIMEOUT Ta "A user-defined time interval has elapsed."
 .It Sy PN_WRITE Ta "Data can be written to a file descriptor without blocking."
-.El
-.Pp
-When creating a new watch, the following flag may also be used:
-.Bl -column "Flag" "Meaning" -offset indent
-.It Sy PN_ONESHOT Ta "Delete the watch after an event occurs."
 .El
 .Sh WATCHES
 A watch is a set of events that an application wishes to be notified about.

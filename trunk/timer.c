@@ -30,15 +30,9 @@
 
 
 struct pn_timer {
-
-	/** The time after which the timer expires */
-	time_t expires;
-
-	/** The watch associated with the timer event */
-	struct watch *watch;
-
-	/** Pointers to the next and previous list entries */
-	LIST_ENTRY(pn_timer) entries;
+	time_t expires;		 /** The time after which the timer expires */
+	struct watch *watch;	 /** The watch associated with the timer event */
+	LIST_ENTRY(pn_timer) entries; /** Pointers to the next and previous list entries */
 };
 
 
@@ -104,13 +98,6 @@ pn_rm_timer(struct watch *watch)
 }
 
 
-void
-pn_timer_init(void)
-{
-	LIST_INIT(&TIMER);
-}
-
-
 void *
 pn_timer_loop(void *unused)
 {
@@ -135,27 +122,22 @@ pn_timer_loop(void *unused)
 				/* Add the event to an event queue */
 				pn_event_add(timer->watch, PN_TIMEOUT);
 
-				/* Remove the timer if ONESHOT is requested */
-				if (timer->watch->mask & PN_ONESHOT) {
+				/* Remove the timer */
 
-					/* Delete the watch*/
-					watch_cancel(timer->watch);
+				/* Delete the watch*/
+				watch_cancel(timer->watch);
 
-					/* Delete the timer entry */
-					LIST_REMOVE(timer, entries);
-					free(timer);
-
-					/* Disable the periodic timer if there are no more timers */
-					//if (LIST_EMPTY(&TIMER)) 
-					//	timer_disable();
-
-				} else {
-					/* Reset the timer to it's initial value */
-					timer->expires = now + timer->watch->ident.interval;
-				}
+				/* Delete the timer entry */
+				LIST_REMOVE(timer, entries);
+				free(timer);
 
 			}
 		}
+
+		/* Disable the periodic timer if there are no more timers */
+		//if (LIST_EMPTY(&TIMER)) 
+		//	timer_disable();
+
 		pthread_mutex_unlock(&TIMER_MUTEX);
 	}
 

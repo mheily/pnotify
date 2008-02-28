@@ -10,9 +10,6 @@
 #include "pnotify.h"
 #include "pnotify-internal.h"
 
-/* Global context variable */
-struct pnotify_ctx *ctx;
-
 /* Compare a pnotify_event against an expected set of values */
 int
 event_cmp(struct event *ev, struct watch *watch, int mask)
@@ -44,7 +41,7 @@ test_signals()
 	test ((w = watch_signal(SIGUSR1, NULL, NULL)));
 	test (kill(getpid(), SIGUSR1));
 	test (event_wait(&evt));
-	if (!event_cmp(&evt, w, PN_SIGNAL)) 
+	if (!event_cmp(&evt, w, 0)) 
 		err(1, "unexpected event value");
 	printf("signal tests complete\n");
 }
@@ -58,7 +55,7 @@ test_fd()
 
 	printf("fd tests\n");
 	test (pipe(fildes));
-	test ((w = watch_fd(fildes[0], PN_READ, NULL, NULL)));
+	test ((w = watch_fd(fildes[0], NULL, NULL)));
 	if (write(fildes[1], "a", 1) != 1)
 		err(1, "write(2)");
 	test (event_wait(&evt));
@@ -74,13 +71,13 @@ test_timer()
  	struct watch *w;
 
 	printf("timer tests\n");
-	test ((w = watch_timer(1, PN_ONESHOT, NULL, NULL)));
+	test ((w = watch_timer(1, NULL, NULL)));
 	test (event_wait(&evt));
 	printf("timer tests complete\n");
 }
 
 static void 
-test_callback(int signum)
+test_callback(void *arg)
 {
 	printf("all tests passed.\n");
 	exit(EXIT_SUCCESS);
@@ -89,8 +86,8 @@ test_callback(int signum)
 static void
 test_dispatch()
 {
-	test (watch_timer(1, PN_DEFAULT, test_callback, 0));
-	test (event_dispatch());
+	test (watch_timer(1, test_callback, 0));
+	event_dispatch();
 }
 
 
@@ -104,9 +101,7 @@ main(int argc, char **argv)
 	if (system("mkdir .check/dir") < 0)
 		err(1, "mkdir failed");
 
-	/* Initialize the queue */
-	test(ctx = pnotify_init());
-
+	pnotify_init();
 	test_fd();
 	test_signals();
 	test_timer();

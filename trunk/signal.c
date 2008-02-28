@@ -64,14 +64,11 @@ default_signal_handler(int signum)
 }
 
 void *
-pn_signal_loop(void * unused)
+pn_signal_loop(void * unused __attribute__((unused)))
 {
 	sigset_t signal_set;
 	struct watch *watch;
 	int signum;
-
-	/* Avoid a compiler warning */
-	watch = unused;
 
 	/* Loop forever waiting for signals */
 	for (;;) {
@@ -87,7 +84,7 @@ pn_signal_loop(void * unused)
 		watch = SIG_WATCH[signum];
 		if (watch != NULL) {
 			/* Add the event to an event queue */
-			pn_event_add(watch, PN_SIGNAL);
+			pn_event_add(watch, 0);
 		} else {
 			default_signal_handler(signum);
 			continue;
