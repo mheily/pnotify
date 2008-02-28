@@ -127,8 +127,11 @@ pnotify_init(void)
 	/* Set the global per-thread context variable */
 	CTX_SET(ctx);
 
+#ifndef __linux__
 	/* Push the cleanup routine on the stack */
+	/* XXX - This causes random errors later on, probably macro-related */
 	pthread_cleanup_push((void (*)(void *)) pnotify_free, ctx);
+#fi
 
 	return;
 

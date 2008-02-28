@@ -103,17 +103,12 @@ int
 linux_add_watch(struct watch *watch)
 {
 	struct epoll_event *ev = &watch->epoll_evt;
-	int mask = watch->mask;
 
 	switch (watch->type) {
 
 		case WATCH_FD:
 			/* Generate the epoll_event structure */
-			ev->events = EPOLLET;
-			if (mask & PN_READ)
-				ev->events |= EPOLLIN;
-			if (mask & PN_WRITE)
-				ev->events |= EPOLLOUT;
+			ev->events = EPOLLET | EPOLLIN | EPOLLOUT;
 			ev->data.ptr = watch;
 
 			/* Add the epoll_event structure to the kernel queue */
