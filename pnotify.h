@@ -119,9 +119,6 @@ struct watch {
 	void (*cb)();
 	void *arg;
 
-	/** The context that receives the event */
-	struct pnotify_ctx *ctx;
-
 #if defined(BSD)
 
 	/* The associated kernel event structure */
@@ -141,21 +138,6 @@ struct watch {
 	struct {
 		struct watch *le_next;   /* next element */
 		struct watch **le_prev;  /* address of previous next element */
-	} entries;
-};
-
-/** An event */
-struct event {
-
-	/** The watch that is interested in this event  */
-	struct watch *watch;
-
-	/** One or more bitflags containing the event(s) that occurred */
-	int       mask;
-
-	/** (STAILQ_ENTRY) Pointers to the next list element */
-	struct { 
-		struct event *stqe_next; /* next element */
 	} entries;
 };
 
@@ -179,13 +161,8 @@ void pnotify_init(void);
 int watch_cancel(struct watch *watch);
 
 
-/**
-  Wait for an event to occur.
-
-  @param evt an event structure that will store the result
-  @return 0 if successful, or non-zero if an error occurred.
-*/
-int event_wait(struct event *evt);
+/* Undocumented API function - Used for unit testing */
+struct event * event_wait(void);
 
 
 /**

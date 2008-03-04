@@ -34,14 +34,14 @@ event_cmp(struct event *ev, struct watch *watch, int mask)
 static void
 test_signals()
 {
-	struct event    evt;
+	struct event    *evt;
  	struct watch *w;
 
 	printf("signal tests\n");
 	test ((w = watch_signal(SIGUSR1, NULL, NULL)));
 	test (kill(getpid(), SIGUSR1));
-	test (event_wait(&evt));
-	if (!event_cmp(&evt, w, 0)) 
+	evt = event_wait();
+	if (!event_cmp(evt, w, 0)) 
 		err(1, "unexpected event value");
 	printf("signal tests complete\n");
 }
@@ -49,7 +49,7 @@ test_signals()
 static void
 test_fd()
 {
-	struct event evt;
+	struct event *evt;
  	struct watch *w;
 	int fildes[2];
 
@@ -58,8 +58,8 @@ test_fd()
 	test ((w = watch_fd(fildes[0], NULL, NULL)));
 	if (write(fildes[1], "a", 1) != 1)
 		err(1, "write(2)");
-	test (event_wait(&evt));
-	if (!event_cmp(&evt, w, PN_READ)) 
+	evt = event_wait();
+	if (!event_cmp(evt, w, PN_READ)) 
 		err(1, "unexpected event value");
 	printf("fd tests complete\n");
 }
@@ -67,12 +67,12 @@ test_fd()
 static void
 test_timer()
 {
-	struct event evt;
+	struct event *evt;
  	struct watch *w;
 
 	printf("timer tests\n");
 	test ((w = watch_timer(1, NULL, NULL)));
-	test (event_wait(&evt));
+	evt = event_wait();
 	printf("timer tests complete\n");
 }
 
