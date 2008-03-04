@@ -18,7 +18,7 @@
 
 lib_LTLIBRARIES=	libpnotify.la
 include_HEADERS=	pnotify.h
-noinst_HEADERS=		queue.h pnotify-internal.h thread.h
+noinst_HEADERS=		queue.h pnotify-internal.h
 dist_man3_MANS=		pnotify.3
 EXTRA_DIST=		index.html Doxyfile
 
