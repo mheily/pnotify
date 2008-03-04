@@ -24,6 +24,7 @@
 #include <errno.h>
 #include <dirent.h>
 #include <semaphore.h>
+#include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -37,39 +38,26 @@
 
 #include "pnotify.h"
 #include "queue.h"
-#include "thread.h"
 
 /* kqueue(4) in MacOS/X does not support NOTE_TRUNCATE */
 #ifndef NOTE_TRUNCATE
 # define NOTE_TRUNCATE 0
 #endif
 
-#define CTX_GET()      ((struct pnotify_ctx *) pthread_getspecific(CTX_KEY))
-#define CTX_SET(ctx)   (pthread_setspecific(CTX_KEY, ctx))
-extern pthread_key_t CTX_KEY;
+/** An event */
+struct event {
+
+	/** The watch that is interested in this event  */
+	struct watch *watch;
+
+	/** One or more bitflags containing the event(s) that occurred */
+	int       mask;
+
+	STAILQ_ENTRY(event) entries;
+};
 
 /* Defined in signal.c */
 extern struct watch *SIG_WATCH[NSIG + 1];
-
-/** pnotify context */
-struct pnotify_ctx {
-
-	/** A list of events that are ready to be delivered */
-	STAILQ_HEAD(, event) event;
-
-	/** A mutex used to synchronize access between threads */
-	pthread_mutex_t mutex;
-
-	/** The number of unprocessed events.
-	 *
-	 * This sempaphore is incremented when an event is added
-	 * to the `event' queue, and decremented when the event
-	 * is delivered to the caller via pnotify_get_event().
-	 * When the counter is zero, the caller will block
-	 * inside of pnotify_get_event().
-	 */
-	sem_t event_count;
-};
 
 /* TODO - not used yet */
 /** An entry within a pnotify_buffer chain */
@@ -136,5 +124,22 @@ struct pnotify_vtable {
 extern const struct pnotify_vtable * const sys;
 extern const struct pnotify_vtable LINUX_VTABLE;
 extern const struct pnotify_vtable BSD_VTABLE;
+
+/*
+ * Convenience macros for locking/unlocking mutexes.
+ */
+#define MUTEX_DEBUG 0
+
+#define MUTEX_LOCK(st)		do {					\
+   if (MUTEX_DEBUG) 							\
+	printf("%s takes the lock\n", __func__);			\
+   (void) pthread_mutex_lock(&st);					\
+} while (0)
+
+#define MUTEX_UNLOCK(st)	do {					\
+   if (MUTEX_DEBUG)			 				\
+	printf("  %s releases the lock\n", __func__);			\
+   (void) pthread_mutex_unlock(&st);					\
+} while (0)
 
 #endif /* _PNOTIFY_INTERNAL_H */

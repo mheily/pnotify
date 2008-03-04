@@ -26,7 +26,6 @@
 #include "pnotify.h"
 #include "pnotify-internal.h"
 #include "queue.h"
-#include "thread.h"
 
 
 struct pn_timer {

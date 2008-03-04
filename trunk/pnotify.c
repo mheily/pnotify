@@ -34,7 +34,6 @@
 #include "pnotify.h"
 #include "pnotify-internal.h"
 #include "queue.h"
-#include "thread.h"
 
 /** @file
  *
@@ -42,11 +41,10 @@
  *
 */
 
-/** A global pnotify context variable
- *
- * This variable must always be accessed using the GET and SET methods.
- */
-pthread_key_t CTX_KEY;
+/** A global list of events that are ready to be delivered */
+STAILQ_HEAD(, event) EVENT;
+pthread_mutex_t EVENT_MUTEX;
+pthread_cond_t EVENT_COND;
 
 /* Define the system-specific vtable.  */
 #if defined(BSD)
@@ -62,19 +60,11 @@ pthread_mutex_t WATCH_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 /* Defined in timer.c */
 extern LIST_HEAD(, pn_timer) TIMER;
 
-/* Forward declarations */
-static void pnotify_free(struct pnotify_ctx *ctx);
-
-
 
 static void
 pnotify_init_once(void)
 {
 	pthread_t tid;
-
-	/* Initialize the TLS key */
-	if (pthread_key_create(&CTX_KEY, NULL) != 0) 
-		errx(1, "error creating TLS key");
 
 	/* Block all signals */
 	pn_mask_signals();
@@ -87,12 +77,31 @@ pnotify_init_once(void)
 	if (pthread_create( &tid, NULL, pn_timer_loop, NULL ) != 0)
 		errx(1, "pthread_create(3) failed");
 
-	/* Initialize lists */
+	/* Initialize global data structures */
 	LIST_INIT(&WATCH);
 	LIST_INIT(&TIMER);
+	STAILQ_INIT(&EVENT);
+
+	/* Initialize synchronization primitives */
+	if (pthread_mutex_init(&EVENT_MUTEX, NULL) != 0) {
+		warn("pthread_mutex_init(3) failed");
+		goto err1;
+	}
+	if (pthread_cond_init(&EVENT_COND, NULL) != 0) {
+		warn("pthread_cond_init(3) failed");
+		goto err2;
+	}
 
 	/* Perform system-specific initialization */
 	sys->init_once();
+
+	return;
+
+err2:
+	(void) pthread_cond_destroy(&EVENT_COND);
+
+err1:
+	(void) pthread_mutex_destroy(&EVENT_MUTEX);
 }
 
 
@@ -100,55 +109,15 @@ void
 pnotify_init(void)
 {
 	static pthread_once_t once = PTHREAD_ONCE_INIT;
-	struct pnotify_ctx *ctx = NULL;
 
 	/* Perform one-time initialization */
 	pthread_once(&once, pnotify_init_once);
-
-	/* Allocate a new context structure */
-	if ((ctx = calloc(1, sizeof(*ctx))) == NULL) {
-		warn("calloc(3) failed");
-		goto err1;
-	}
-	STAILQ_INIT(&ctx->event);
-
-	/* Initialize the mutex */
-	if (pthread_mutex_init(&ctx->mutex, NULL) != 0) {
-		warn("pthread_mutex_init(3) failed");
-		goto err1;
-	}
-
-	/* Initialize the counting semaphore */
-	if (sem_init(&ctx->event_count, 0, 0) != 0) {
-		warn("sem_init(3) failed");
-		return;
-	}
-		
-	/* Set the global per-thread context variable */
-	CTX_SET(ctx);
-
-#ifndef __linux__
-	/* Push the cleanup routine on the stack */
-	/* XXX - This causes random errors later on, probably macro-related */
-	pthread_cleanup_push((void (*)(void *)) pnotify_free, ctx);
-#fi
-
-	return;
-
-err1:
-	(void) pthread_mutex_destroy(&ctx->mutex);
-	free(ctx);
 }
 
 
 int
 pnotify_add_watch(struct watch *watch)
 {
-	/* Get the context */
-	if (!watch->ctx)
-		watch->ctx = CTX_GET();
-	assert(watch->ctx);
-
 	/* Register the watch with the kernel */
 	if (sys->add_watch(watch) < 0) {
 		warn("adding watch failed");
@@ -193,91 +162,36 @@ watch_cancel(struct watch *watch)
 	}
 
 	/* Remove from the global watchlist */
-	pthread_mutex_lock(&WATCH_MUTEX);
+	MUTEX_LOCK(WATCH_MUTEX);
 	LIST_REMOVE(watch, entries);
-	pthread_mutex_unlock(&WATCH_MUTEX);
+	MUTEX_UNLOCK(WATCH_MUTEX);
 
 	return 0;
 }
 
 
-int
-event_wait(struct event * evt)
+struct event * 
+event_wait(void)
 { 
-	struct pnotify_ctx * ctx;
 	struct event *evp;
 
-	assert(evt);
-
-	ctx = CTX_GET();
-
 	/* Wait for an event to be added to the queue */
+	MUTEX_LOCK(EVENT_MUTEX);
 retry:
-	if (sem_wait(&ctx->event_count) != 0) {
-		if (errno == EINTR)
-			goto retry;
-		warn("sem_wait(3) failed");
-		return -1;
+	if (pthread_cond_wait(&EVENT_COND, &EVENT_MUTEX) != 0) {
+		warn("pthread_cond_wait(3) failed");
+		return NULL;
 	}
-		
 
 	/* Shift the first element off of the pending event queue */
-	mutex_lock(ctx);
-	if (!STAILQ_EMPTY(&ctx->event)) {
-		evp = STAILQ_FIRST(&ctx->event);
-		STAILQ_REMOVE_HEAD(&ctx->event, entries);
-		mutex_unlock(ctx);
-		memcpy(evt, evp, sizeof(*evt));
-		free(evp);
-		return 0;
-	} else {
-		warnx("spurious wakeup");
-		mutex_unlock(ctx);
-		return -1;
+	if ((evp = STAILQ_FIRST(&EVENT)) != NULL) {
+		STAILQ_REMOVE_HEAD(&EVENT, entries);
+		MUTEX_UNLOCK(EVENT_MUTEX);
+		return evp;
 	}
-}
 
-
-static void
-pnotify_free(struct pnotify_ctx *ctx)
-{
-	struct event *evt, *nxt;
-
-	assert(ctx != NULL);
-
-	mutex_lock(ctx);
-
-#if FIXME
-	// need to scan the global watchlist
-	
-	/* Delete all watches */
-	//struct pn_watch *watch;
-	while (!LIST_EMPTY(&ctx->watch)) {
-		watch = LIST_FIRST(&ctx->watch);
-		if (pnotify_rm_watch(ctx, watch->wd) < 0) 
-			errx(1,"error removing watch");
-	}
-#endif
-
-	/* Delete all pending events */
-  	evt = STAILQ_FIRST(&ctx->event);
-        while (evt != NULL) {
-		nxt = STAILQ_NEXT(evt, entries);
-		free(evt);
-		evt = nxt;
-    	}
-
-	/* Destroy the semaphore and mutex */
-	if (sem_destroy(&ctx->event_count) != 0) 
-		err(1, "sem_init(3) failed");
-	if (pthread_mutex_destroy(&ctx->mutex) != 0) 
-		err(1, "pthread_mutex_destroy(3) failed");
-
-	/* Perform system-specific cleanup */
-	sys->cleanup();
-
-	mutex_unlock(ctx);
-	free(ctx);
+	/* Handle a spurious wakeup */
+	goto retry;
 }
 
 
@@ -327,22 +241,17 @@ watch_signal(int signum, void (*cb)(int, void *), void *arg)
 void
 event_dispatch(void)
 {
-	struct event evt;
+	struct event *evt;
 
 	for (;;) {
 		/* Wait for an event */
-		if (event_wait(&evt) != 0)
+		if ((evt = event_wait()) == NULL)
 			abort();
 
-		/* Ignore events that have no callback defined */
-		/* FIXME - this sounds like a bad idea... maybe crash instead */
-		if (evt.watch->cb == NULL) {
-			dprintf("ERROR: Cannot dispatch an event without a callback\n");
-			abort();
-		} else if (evt.watch->type == WATCH_TIMER) {
-			 evt.watch->cb(evt.mask, evt.watch->arg);
+		if (evt->watch->type == WATCH_TIMER) {
+			 evt->watch->cb(evt->mask, evt->watch->arg);
 		} else {
-			 evt.watch->cb(evt.watch->ident.fd, evt.mask, evt.watch->arg);
+			 evt->watch->cb(evt->watch->ident.fd, evt->mask, evt->watch->arg);
 		}
 	}
 }
@@ -361,12 +270,11 @@ pn_event_add(struct watch *watch, int mask)
 	evt->watch = watch;
 	evt->mask = mask;
 
-	/* Assign the event to a context */
-	mutex_lock(watch->ctx);
-	STAILQ_INSERT_HEAD(&watch->ctx->event, evt, entries);
-	mutex_unlock(watch->ctx);
+	/* Assign the event */
+	MUTEX_LOCK(EVENT_MUTEX);
+	STAILQ_INSERT_TAIL(&EVENT, evt, entries);
+	MUTEX_UNLOCK(EVENT_MUTEX);
 
-	/* Increase the event counter, waking the thread */
-	if (sem_post(&watch->ctx->event_count) != 0)
-		err(1, "sem_post(3)");
+	/* Signal a worker thread to process the event */
+	(void) pthread_cond_signal(&EVENT_COND);
 }
