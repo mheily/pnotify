@@ -112,11 +112,11 @@ linux_add_watch(struct watch *watch)
 			ev->data.ptr = watch;
 
 			/* Add the epoll_event structure to the kernel queue */
-			if (epoll_ctl(EPOLL_FD, EPOLL_CTL_ADD, watch->ident.fd, ev) < 0) {
+			if (epoll_ctl(EPOLL_FD, EPOLL_CTL_ADD, watch->ident, ev) < 0) {
 				warn("epoll_ctl(2) failed");
 				return -1;
 				}
-			dprintf("added epoll watch for fd #%d", watch->ident.fd);
+			dprintf("added epoll watch for fd #%d", watch->ident);
 			break;
 
 		default:
