@@ -19,10 +19,8 @@
 .Fn "watch_timer" "time_t interval" "void (*cb)(void *)" "void *arg"
 .Ft "struct watch *"
 .Fn watch_cancel "struct watch *w"
-.Ft int
-.Fn event_wait "struct event *evt"
 .Ft void
-.Fn event_dispatch
+.Fn pnotify_shutdown
 .Pp
 .Sh DESCRIPTION
 The
