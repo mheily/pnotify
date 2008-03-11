@@ -25,7 +25,6 @@
 
 #include "pnotify.h"
 #include "pnotify-internal.h"
-#include "queue.h"
 
 
 struct pn_timer {
@@ -54,7 +53,7 @@ pn_add_timer(struct watch *watch)
 		warn("malloc(3)");
 		return -1;
 	}
-	timer->expires = time(NULL) + watch->ident.interval;
+	timer->expires = time(NULL) + watch->ident;
 	timer->watch = watch;
 
 	pthread_mutex_lock(&TIMER_MUTEX);

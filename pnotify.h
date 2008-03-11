@@ -57,51 +57,13 @@ enum pn_watch_type {
 };
 
 
-/** A unique resource identifier */
-union pn_resource_id {
-	/** An open file descriptor
-	 *
-	 * Can receive PN_READ | PN_WRITE | PN_CLOSE events
-	 */ 
-	int fd;
-
-	/**
-	 * A signal number
-	 *
-	 * When received, creates a PN_SIGNAL event.
-	 */
-	int signum;
-
-	/**
-	 * A timer interval (in seconds)
-	 *
-	 * When the interval elapses, a PN_TIMER event is created.
-	 */
-	int interval;
-};
-
-
 /** The bitmask of events to monitor */
 enum pn_event_bitmask {
-
-	/** Use the default settings when creating a watch */
-	PN_DEFAULT              = 0,
-
-	/** Data is ready to be read from a file descriptor */
-	PN_READ                 = 0x1 << 1,
-
-	/** Data is ready to be written to a file descriptor */
-	PN_WRITE                = 0x1 << 2,
-
-	/** A socket or pipe descriptor was closed by the remote end */
-	PN_CLOSE                = 0x1 << 3,
-
-	/** A timer expired */
-	PN_TIMEOUT              = 0x1 << 4,  
-
-	/** An error condition in the underlying kernel event queue */
-	PN_ERROR		= 0x1 << 31,
-
+	PN_READ,	/** Data is ready to be read from a file descriptor */
+	PN_WRITE, 	/** Data is ready to be written to a file descriptor */
+	PN_CLOSE,	/** A socket or pipe descriptor was closed by the remote end */
+	PN_TIMEOUT,	/** A timer expired */
+	PN_ERROR	/** An error condition in the underlying kernel event queue */
 };
 
 /**
@@ -113,7 +75,7 @@ struct watch {
 	enum pn_watch_type type;
 
 	/** The resource ID */
-	union pn_resource_id ident;
+	int ident;
 
 	/** A callback to be invoked when a matching event occurs */
 	void (*cb)();
