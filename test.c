@@ -10,20 +10,9 @@
 #include "pnotify.h"
 #include "pnotify-internal.h"
 
-/* Compare a pnotify_event against an expected set of values */
-int
-event_cmp(struct event *ev, struct watch *watch, int mask)
-{
-	int i = (ev->watch == watch) &&
-		(ev->mask == mask);
-		
-	if (!i) {
-		printf(" *ERROR * mismatch: expecting (watch:mask) of '%p:%d' but got '%p:%d'\n",
-			  watch, mask,
-			  ev->watch, ev->mask);
-	}
-	return i;
-}
+int FD_RESULT = -1;
+int TIMER_RESULT = -1;
+int SIGNAL_RESULT = -1;
 
 #define test(x) do { \
    printf(" * " #x ": "); 				\
@@ -31,63 +20,53 @@ event_cmp(struct event *ev, struct watch *watch, int mask)
    printf("%s\n", ((x) >= 0) ? "passed" : "failed");	\
 } while (0)
 
+
+void
+signal_cb(int signum, void *arg)
+{
+	SIGNAL_RESULT = (signum == SIGUSR1) ? 0 : 1;
+}
+
 static void
 test_signals()
 {
-	struct event    *evt;
  	struct watch *w;
 
-	printf("signal tests\n");
-	test ((w = watch_signal(SIGUSR1, NULL, NULL)));
+	test ((w = watch_signal(SIGUSR1, signal_cb, NULL)));
 	test (kill(getpid(), SIGUSR1));
-	evt = event_wait();
-	if (!event_cmp(evt, w, 0)) 
-		err(1, "unexpected event value");
-	printf("signal tests complete\n");
+}
+
+void
+fd_cb(int fd, int evt, void *arg)
+{
+	FD_RESULT = (evt & PN_READ) ? 0 : 1;
 }
 
 static void
 test_fd()
 {
-	struct event *evt;
  	struct watch *w;
 	int fildes[2];
 
 	printf("fd tests\n");
 	test (pipe(fildes));
-	test ((w = watch_fd(fildes[0], NULL, NULL)));
+	test ((w = watch_fd(fildes[0], fd_cb, NULL)));
 	if (write(fildes[1], "a", 1) != 1)
 		err(1, "write(2)");
-	evt = event_wait();
-	if (!event_cmp(evt, w, PN_READ)) 
-		err(1, "unexpected event value");
-	printf("fd tests complete\n");
+}
+
+void
+timer_cb(void *arg)
+{
+	TIMER_RESULT = 0;
 }
 
 static void
 test_timer()
 {
-	struct event *evt;
  	struct watch *w;
 
-	printf("timer tests\n");
-	test ((w = watch_timer(1, NULL, NULL)));
-	evt = event_wait();
-	printf("timer tests complete\n");
-}
-
-static void 
-test_callback(void *arg)
-{
-	printf("all tests passed.\n");
-	exit(EXIT_SUCCESS);
-}
-
-static void
-test_dispatch()
-{
-	test (watch_timer(1, test_callback, 0));
-	event_dispatch();
+	test ((w = watch_timer(1, timer_cb, NULL)));
 }
 
 
@@ -102,8 +81,16 @@ main(int argc, char **argv)
 		err(1, "mkdir failed");
 
 	pnotify_init();
+
 	test_fd();
 	test_signals();
 	test_timer();
-	test_dispatch(); 
+	sleep(5);	/*XXX-FIXME*/
+	printf ("fd: %d\n", FD_RESULT);
+	printf ("timer: %d\n", TIMER_RESULT);
+	printf ("signal: %d\n", SIGNAL_RESULT);
+
+	if ( FD_RESULT || TIMER_RESULT || SIGNAL_RESULT ) 
+		errx(1, "one or more test(s) failed");
+	exit(0);
 }
