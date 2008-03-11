@@ -33,13 +33,16 @@
 
 #include "pnotify.h"
 #include "pnotify-internal.h"
-#include "queue.h"
 
 /** @file
  *
  *  All externally visible functions in the pnotify API.
  *
 */
+
+/* All worker threads */
+pthread_t *WORKER;
+size_t WORKER_COUNT = 0;
 
 /** A global list of events that are ready to be delivered */
 STAILQ_HEAD(, event) EVENT;
@@ -60,11 +63,31 @@ pthread_mutex_t WATCH_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 /* Defined in timer.c */
 extern LIST_HEAD(, pn_timer) TIMER;
 
+static int
+get_cpu_count(void)
+{
+#if defined(BSD)
+	FILE *f;
+	char buf[3];
+
+	if ((f = popen( "/sbin/sysctl -n hw.ncpu", "r")) == NULL)
+		err(1, "popen(3)");
+	if ((fgets((char *) &buf, sizeof(buf), f)) == NULL)
+		err(1, "fgets(3)");
+	(void) fclose(f);
+
+	/* FIXME - error checking */
+	return ((int) strtol((char *) &buf, NULL, 10));
+#endif
+	
+	return 1;
+}
 
 static void
 pnotify_init_once(void)
 {
 	pthread_t tid;
+	int i;
 
 	/* Block all signals */
 	pn_mask_signals();
@@ -76,6 +99,14 @@ pnotify_init_once(void)
 	/* Create a dedicated timer thread */
 	if (pthread_create( &tid, NULL, pn_timer_loop, NULL ) != 0)
 		errx(1, "pthread_create(3) failed");
+
+	/* Create a pool of worker threads */
+	WORKER_COUNT = get_cpu_count();
+	WORKER = calloc(WORKER_COUNT, sizeof(pthread_t));
+	for (i = 0; i < WORKER_COUNT; i++) {
+		if (pthread_create(&WORKER[i], NULL, (void *(*)(void *)) event_dispatch, NULL) != 0)
+			errx(1, "pthread_create(3) failed");
+	}
 
 	/* Initialize global data structures */
 	LIST_INIT(&WATCH);
@@ -132,7 +163,7 @@ pnotify_add_watch(struct watch *watch)
 
 	else if (watch->type == WATCH_SIGNAL) {
 		pthread_mutex_lock(&WATCH_MUTEX);
-		SIG_WATCH[watch->ident.signum] = watch;
+		SIG_WATCH[watch->ident] = watch;
 		pthread_mutex_unlock(&WATCH_MUTEX);
 	}
 
@@ -200,13 +231,15 @@ _watch_add(enum pn_watch_type wtype, int fd, const char *path, void (*cb)(), voi
 {
 	struct watch *w;
 
+	assert(cb);
+
 	/* Generate the watch */
 	if ((w = calloc(1, sizeof(*w))) == NULL) 
 		return NULL;
 	w->type = wtype;
 	w->cb = cb;
 	w->arg = arg;
-	w->ident.fd = fd;
+	w->ident = fd;
 
 	/* Add the watch */
 	if (pnotify_add_watch(w) != 0) {
@@ -249,11 +282,12 @@ event_dispatch(void)
 			abort();
 
 		if (evt->watch->type == WATCH_TIMER) {
-			 evt->watch->cb(evt->mask, evt->watch->arg);
+			evt->watch->cb(evt->mask, evt->watch->arg);
 		} else {
-			 evt->watch->cb(evt->watch->ident.fd, evt->mask, evt->watch->arg);
+			evt->watch->cb(evt->watch->ident, evt->mask, evt->watch->arg);
 		}
 	}
+
 }
 
 

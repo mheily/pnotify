@@ -163,7 +163,7 @@ bsd_add_watch(struct watch *watch)
 
 	/* Create and populate a kevent structure */
 	if (watch->type == WATCH_FD) {
-			EV_SET(kev, watch->ident.fd, 
+			EV_SET(kev, watch->ident, 
 					EVFILT_READ | EVFILT_WRITE, 
 					EV_ONESHOT | EV_ADD | EV_CLEAR, 0, 0, watch);
 	} else {
