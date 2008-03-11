@@ -48,10 +48,15 @@ doc:
 	doxygen
 
 # The 'sync' target rebuilds the webpage and uploads it to the public server
-
 sync:	
 	scp -r index.html manpage.html manpage.ps manpage.pdf doxygen/ \
 	  heily.com:~/public_html/pnotify
 
 # Ensure that the documentation is regenerated when building a source tarball
 dist-hook:	doc
+
+diff:
+	svn diff | gvim - 2>/dev/null
+
+edit:
+	gvim *.[ch]
