@@ -61,7 +61,8 @@ LIST_HEAD(pnwatchhead, watch) WATCH;
 pthread_mutex_t WATCH_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 
 /* Defined in timer.c */
-extern LIST_HEAD(, pn_timer) TIMER;
+extern LIST_HEAD(, timer) TIMER;
+extern pthread_mutex_t TIMER_MUTEX;
 
 static int
 get_cpu_count(void)
@@ -97,7 +98,7 @@ pnotify_init_once(void)
 		errx(1, "pthread_create(3) failed");
 
 	/* Create a dedicated timer thread */
-	if (pthread_create( &tid, NULL, pn_timer_loop, NULL ) != 0)
+	if (pthread_create( &tid, NULL, timer_loop, NULL ) != 0)
 		errx(1, "pthread_create(3) failed");
 
 	/* Create a pool of worker threads */

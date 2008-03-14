@@ -46,14 +46,9 @@ struct pnotify_ctx;
 
 /** The type of resource to be watched */
 enum pn_watch_type {
-	/** An open file descriptor */
-	WATCH_FD,
-
-	/** A user-defined timer */
-	WATCH_TIMER,
-
-	/** Signals from the operating system */
-	WATCH_SIGNAL,
+	WATCH_FD,		 /** An open file descriptor */
+	WATCH_TIMER,		 /** A user-defined timer */
+	WATCH_SIGNAL,		 /** Signals from the operating system */
 };
 
 
@@ -112,7 +107,6 @@ struct watch {
   a call to pnotify_init(). 
 */
 void pnotify_init(void);
-
 
 /**
   Remove a watch.

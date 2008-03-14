@@ -27,15 +27,8 @@
 #include "pnotify-internal.h"
 
 
-struct pn_timer {
-	time_t expires;		 /** The time after which the timer expires */
-	struct watch *watch;	 /** The watch associated with the timer event */
-	LIST_ENTRY(pn_timer) entries; /** Pointers to the next and previous list entries */
-};
-
-
 /** A list of all active timers */
-LIST_HEAD(, pn_timer) TIMER;
+LIST_HEAD(, timer) TIMER;
 
 /** The smallest interval (in seconds) of all timers in the TIMER list. */
 size_t TIMER_INTERVAL = 1;
@@ -46,7 +39,7 @@ pthread_mutex_t TIMER_MUTEX = PTHREAD_MUTEX_INITIALIZER;
 int
 pn_add_timer(struct watch *watch)
 {
-	struct pn_timer *timer;
+	struct timer *timer;
 
 	/* Allocate a new timer struct */
 	if ((timer = calloc(1, sizeof(*timer))) == NULL) {
@@ -74,7 +67,7 @@ pn_add_timer(struct watch *watch)
 int
 pn_rm_timer(struct watch *watch)
 {
-	struct pn_timer *timer, *tmp;
+	struct timer *timer, *tmp;
 
 	pthread_mutex_lock(&TIMER_MUTEX);
 
@@ -97,9 +90,9 @@ pn_rm_timer(struct watch *watch)
 
 
 void *
-pn_timer_loop(void *unused)
+timer_loop(void *unused)
 {
-	struct pn_timer *timer, *tmp;
+	struct timer *timer, *tmp;
 	time_t now;
 
 	/* Loop forever marking time */

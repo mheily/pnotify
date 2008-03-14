@@ -56,6 +56,14 @@ struct event {
 	STAILQ_ENTRY(event) entries;
 };
 
+/** A timer */
+struct timer {
+	time_t expires;		 /** The time after which the timer expires */
+	struct watch *watch;	 /** The watch associated with the timer event */
+	LIST_ENTRY(timer) entries; /** Pointers to the next and previous list entries */
+};
+
+
 /* Defined in signal.c */
 extern struct watch *SIG_WATCH[NSIG + 1];
 
@@ -108,7 +116,7 @@ struct pnotify_buffer {
 /* Forward declarations for private functions */
 
 void * pn_signal_loop(void *);
-void * pn_timer_loop(void *);
+void * timer_loop(void *);
 void pn_event_add(struct watch *watch, int mask);
 void pn_mask_signals();
 int pn_add_timer(struct watch *watch);
