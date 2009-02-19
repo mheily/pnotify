@@ -18,10 +18,13 @@
 #
 
 # This is for FreeBSD 6.2
+#aclocal -I /usr/local/share/aclocal
+#
+# This is for L*nux
+aclocal
 
-aclocal -I /usr/local/share/aclocal &&
 autoheader &&
 libtoolize &&
-automake &&
+automake --add-missing &&
 ./configure &&
 echo 'autogen successful'
