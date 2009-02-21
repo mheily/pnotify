@@ -1,0 +1,32 @@
+Synopsis
+---
+
+Emulate the Linux epoll(7) functions using kqueue(2). 
+
+Usage
+---
+
+ Import the epoll.c and epoll.h files into your source tree. Change all instances of
+
+    #include <sys/epoll.h>
+
+ to this:
+
+    #include "epoll.h"
+
+Status
+---
+
+  Passes all regression tests under OpenBSD 4.2 and Ubuntu 8.10.
+
+TODO
+---
+
+ * Edge-triggered behavior (EPOLLET)
+ * Reading multiple events in a single system call
+ * EPOLLRDHUP 
+
+Author
+--
+
+Mark Heily <mark@heily.com>
